@@ -109,8 +109,9 @@ function pageScript() {
 }
 
 // ---------- Orca process ----------
+// An Orca started with its own --user-data-dir (a trial run, a recording) is a separate app and keeps running.
 function runningOrcaMainPids() {
-  const script = `Get-CimInstance Win32_Process -Filter "Name='Orca.exe'" | Where-Object { $_.ExecutablePath -eq '${ORCA_EXE.replace(/'/g, "''")}' -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch 'app\\.asar' } | ForEach-Object { $_.ProcessId }`
+  const script = `Get-CimInstance Win32_Process -Filter "Name='Orca.exe'" | Where-Object { $_.ExecutablePath -eq '${ORCA_EXE.replace(/'/g, "''")}' -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch 'app\\.asar' -and $_.CommandLine -notmatch '--user-data-dir' } | ForEach-Object { $_.ProcessId }`
   const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
   return out.split(/\s+/).filter(Boolean).map(Number)
 }
