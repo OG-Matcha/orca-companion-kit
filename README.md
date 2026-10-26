@@ -17,6 +17,8 @@
 | ![終端機打字時從游標迸出小火花，右上角累計連擊數](docs/images/typing-sparks.gif) | ![按 Ctrl+Alt+T 開選單，在 Rosé Pine、Tokyo Night、棉花夜空之間切換](docs/images/theme-picker.gif) |
 | **打字特效。** 終端機打字時從游標迸出小火花，右上角算連擊數，停手一陣子就淡掉。 | **Ctrl+Alt+T 換主題。** 點一下就換，不用重開 Orca。換完視窗會自己重新載入一次，讓終端機配色跟上（錄影裡剪掉了這一段）。 |
 
+**位置和大小都能換。** 把寵物拖到任何地方、慢慢放下，那裡就是它的新家；滾輪可以縮放（0.5–2.5 倍）。兩者都會記住，下次開 Orca 還在原位。想換預設位置，在寵物設定寫 `home`（見 [companion-api.md](docs/companion-api.md)）。
+
 另外附了三套經典主題，可以直接用，也可以拿來當範本改：
 
 | Catppuccin Mocha | Rosé Pine | Tokyo Night |
@@ -59,6 +61,17 @@ npm run example        # 範例主題「棉花夜空」和範例寵物 Puff 放�
 
 agent 會先問你幾件事：參考圖、配色、角色個性、招牌動作。接著產生主題 CSS、終端機配色、游標、寵物的 SVG 和設定，全部寫進 `~/.orca/themer/`，最後跑 `npm run check` 確認沒有踩到效能陷阱。整個流程寫在 [`docs/ai-guide.md`](docs/ai-guide.md)。
 
+## 還能自己加什麼
+
+範例只是起點。以下都能自己寫，或直接請 agent 幫你做：
+
+- **寵物的個性。** 台詞、它認得的關鍵字（`words`）、聽到名字時的反應（`names`）、招牌動作和新的動作（`acts`）、要慶祝的紀念日（`milestones`）。內建的反應也能整個換掉。見 [companion-api.md](docs/companion-api.md)。
+- **全新的小功能。** 寵物之外，任何在 Orca 視窗裡跑的效果都可以寫成一個 touch：聚焦光暈、閒置畫面、狀態列裝飾、通知音效……放進 `~/.orca/themer/touches/`，主題列上它的 id 就會啟動，也能在 Ctrl+Alt+T 選單裡單獨開關。見 [touches.md](docs/touches.md)。
+- **可以疊加的樣式片段。** 小段 CSS（例如更圓的邊角）放進 `snippets/`，跟任何主題一起用。見 [themes.md](docs/themes.md#片段snippets)。
+- **修 Orca 的小毛病。** 不改安裝檔，在執行期替換 Orca 的程式片段。見 [fixes.md](docs/fixes.md#寫新的修正)。
+
+寫完跑 `npm run check`，它會抓出已知會讓 Orca 變慢的寫法（[performance.md](docs/performance.md)）。
+
 ## 文件
 
 | 文件 | 內容 |
@@ -96,4 +109,4 @@ npm run chime -- ~/.orca/themer/sounds/my-theme.wav 1046.5 1318.5
 npm install; .\install.ps1; npm run example   # then open Orca from its shortcut, Ctrl+Alt+T
 ```
 
-Open an agent in this folder and ask it to "make me an Orca theme and a desktop pet": `AGENTS.md` tells it how to interview you and what to generate. API reference: `docs/companion-api.md`, `docs/touches.md`. Read `docs/performance.md` before writing any CSS or touch: each rule there comes from a measured slowdown in Orca. Windows only for now (the launcher and shortcut handling use Windows paths and PowerShell).
+Open an agent in this folder and ask it to "make me an Orca theme and a desktop pet": `AGENTS.md` tells it how to interview you and what to generate. Drag the pet anywhere and drop it gently to give it a new home; the mouse wheel resizes it, and both are remembered. Beyond the pet, you can write your own touches (any effect that runs in an Orca window), stackable CSS snippets and runtime fixes. API reference: `docs/companion-api.md`, `docs/touches.md`. Read `docs/performance.md` before writing any CSS or touch: each rule there comes from a measured slowdown in Orca. Windows only for now (the launcher and shortcut handling use Windows paths and PowerShell).
