@@ -13,6 +13,7 @@ import { composeCss, loadLibrary, publicState } from './themes.mjs'
 import { buildRuntimeSource } from './runtime-source.mjs'
 import { seedBundled } from './seed.mjs'
 import { prepareFixes } from './fixes/index.mjs'
+import { checkupDue, lastCheckedVersion, pageProbeExpression, readOrcaVersion, recordChecked, summarizeCheckup } from './checkup.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '..')
@@ -136,7 +137,45 @@ const forwardedArgs = process.argv.slice(2).filter((a) => !a.startsWith('--no-re
 const trialRun = forwardedArgs.some((a) => a.startsWith('--user-data-dir'))
 // Orca allows one instance: an Orca started without the pipe has to close before this one can start.
 if (!process.argv.includes('--no-restart') && !trialRun) stopRunningOrca()
-const patchedAssets = await prepareFixes(ORCA_DIR, settings.enabledFixes ?? [], log)
+// Enabled fixes that did not apply to this Orca build, for the update checkup.
+const fixWarnings = []
+const patchedAssets = await prepareFixes(ORCA_DIR, settings.enabledFixes ?? [], log, fixWarnings)
+
+// ---------- update checkup ----------
+// Once per Orca version: do the fixes, the DOM hooks themes style and the touches still work? Silent
+// when they do; one notice in Orca when not, with the details in themer.log.
+const CHECKUP_FILE = path.join(ROOT, 'orca-version.json')
+const asarModule = (await import('@electron/asar').catch(() => null))?.default
+const orcaVersion = readOrcaVersion(asarModule, path.join(ORCA_DIR, 'resources', 'app.asar'))
+let checkupPending = checkupDue(lastCheckedVersion(CHECKUP_FILE), orcaVersion)
+let runtimeError = null // the first error the injected runtime threw, for the checkup
+log(`Orca ${orcaVersion ?? '(version unknown)'}${checkupPending ? ': new version, checkup after the window loads' : ''}`)
+
+async function runCheckup() {
+  if (!checkupPending) return
+  const sessionId = await mainWindowSession()
+  if (!sessionId) return
+  checkupPending = false
+  const r = await cdp
+    .send('Runtime.evaluate', { expression: pageProbeExpression(), awaitPromise: true, returnByValue: true }, sessionId)
+    .catch((e) => ({ error: e.message }))
+  const probe = r?.result?.value
+  const summary = summarizeCheckup({
+    version: orcaVersion,
+    fixWarnings,
+    hooks: probe?.hooks ?? null,
+    touchErrors: probe?.touchErrors ?? [],
+    runtimeError
+  })
+  for (const line of summary.details) log(line)
+  if (summary.notice) {
+    await cdp
+      .send('Runtime.evaluate', { expression: `window.__orcaThemer?.checkupNotice(${JSON.stringify(summary.notice)})` }, sessionId)
+      .catch((e) => log('checkup notice failed', e.message))
+  }
+  recordChecked(CHECKUP_FILE, orcaVersion, summary.ok)
+}
+
 const { child, cdp } = launchWithPipe(ORCA_EXE, forwardedArgs, { detached: false })
 log('launched Orca pid', child.pid)
 
@@ -403,6 +442,7 @@ cdp.on('Target.attachedToTarget', async ({ sessionId, targetInfo }) => {
     setTimeout(async () => {
       await syncSound().catch((e) => log('sound sync failed', e.message))
       await syncTerminal().catch((e) => log('terminal sync failed', e.message))
+      await runCheckup().catch((e) => log('checkup failed', e.message))
     }, 4000)
   } catch (e) {
     log('attach setup failed', e.message)
@@ -431,7 +471,11 @@ cdp.on('Runtime.executionContextCreated', ({ context }, sessionId) => {
   }
   cdp
     .send('Runtime.evaluate', { expression: pageScript(), contextId: context.id }, sessionId)
-    .then((r) => log('runtime evaluated', r.exceptionDetails ? `error: ${r.exceptionDetails.exception?.description?.slice(0, 200)}` : 'ok'))
+    .then((r) => {
+      const error = r.exceptionDetails ? r.exceptionDetails.exception?.description ?? r.exceptionDetails.text ?? 'error' : null
+      if (error) runtimeError ??= error.slice(0, 500)
+      log('runtime evaluated', error ? `error: ${error.slice(0, 200)}` : 'ok')
+    })
     .catch((e) => log('runtime evaluate failed', e.message))
 })
 

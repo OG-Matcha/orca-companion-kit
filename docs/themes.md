@@ -74,8 +74,11 @@
 | `[data-testid="sortable-tab"]` | 分頁；屬性 `data-tab-id`、`data-tab-title`、`data-agent-activity-status`（`working`、`permission`、`done`、`failed`） |
 | `.bg-worktree-sidebar[data-os-file-drop-owner]` | worktree 側欄（寵物預設待在它右下角） |
 | `[data-sonner-toast]` | 通知。**它的 `::before`、`::after` sonner 自己在用**，裝飾請用 `background` 疊圖層 |
-| `[data-panel-resize-handle-id]`、`[role='separator']` | 面板之間可拖曳的分隔線 |
+| `[data-sidebar-resize-handle]` | 左側欄右緣可拖曳改寬度的那條邊 |
+| `[data-panel-resize-handle-id]`、`[role='separator']` | 面板之間可拖曳的分隔線（只在分割窗格時才有） |
 | `.monaco-editor`、`.monaco-diff-editor` | 檔案編輯器（Monaco）。它不吃 Orca 的變數，背景是自己的 `--vscode-editor-background`；在這兩個選擇器上用 `!important` 改這些 `--vscode-*` 變數（四套內建主題結尾都有範例） |
+
+Orca 改版後第一次啟動，啟動器會自動查一次常駐的掛點（worktree 側欄、側欄拖曳邊，以及開著終端機時的分頁和終端機輸入框）。找不到的會在 Orca 跳一則提醒，細節寫進 `themer.log`；同一版只查一次，查過的版本記在 `~/.orca/themer/orca-version.json`。
 
 ## 終端機配色
 

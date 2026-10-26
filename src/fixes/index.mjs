@@ -8,8 +8,11 @@ import { claudeRestartFix } from './claude-restart.mjs'
 
 export const FIXES = [claudeRestartFix]
 
-/** Returns Map(asset file name -> patched source) for the enabled fixes that match this Orca build. */
-export async function prepareFixes(orcaDir, enabledIds, log = () => {}) {
+/**
+ * Returns Map(asset file name -> patched source) for the enabled fixes that match this Orca build.
+ * An enabled fix that no longer applies, fully or in part, adds a line to `warnings` for the update checkup.
+ */
+export async function prepareFixes(orcaDir, enabledIds, log = () => {}, warnings = []) {
   const served = new Map()
   const wanted = FIXES.filter((fix) => enabledIds.includes(fix.id))
   if (!wanted.length) return served
@@ -21,6 +24,7 @@ export async function prepareFixes(orcaDir, enabledIds, log = () => {}) {
     files = asar.listPackage(asarFile).map((p) => p.replace(/\\/g, '/').replace(/^\//, ''))
   } catch (error) {
     log('fixes: cannot read app.asar (did you run npm install?)', error.message)
+    warnings.push('讀不到 Orca 的 app.asar，修正都沒有套上（npm install 跑過了嗎？）')
     return served
   }
   const assets = files.filter((p) => /^out\/renderer\/assets\/[^/]+\.js$/.test(p))
@@ -45,11 +49,15 @@ export async function prepareFixes(orcaDir, enabledIds, log = () => {}) {
         served.set(path.posix.basename(asset), patched)
         // A fix may apply only in part when one of its pieces no longer matches this Orca build.
         log(`fix ${fix.id}: serving patched ${asset}${fix.partial ? ` (partial: "${fix.partial}" not found, skipped)` : ''}`)
+        if (fix.partial) warnings.push(`${fix.label ?? fix.id}：「${fix.partial}」這部分在這版 Orca 找不到，沒有套上`)
         found = true
         break
       }
     }
-    if (!found) log(`fix ${fix.id}: code not found in this Orca build, skipped`)
+    if (!found) {
+      log(`fix ${fix.id}: code not found in this Orca build, skipped`)
+      warnings.push(`${fix.label ?? fix.id}：這版 Orca 的程式改了，這個修正沒有套上`)
+    }
   }
   return served
 }

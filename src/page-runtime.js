@@ -10,6 +10,7 @@
   const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches
   const touches = new Map() // id -> { start(ctx) -> stop }
   const running = new Map() // id -> stop
+  const touchErrors = [] // { id, error } for touches whose start() threw
   let state = { themes: [], snippets: [], themeId: null, enabledSnippets: [], enabledTouches: [] }
   let css = ''
   // The typing diagnosis switches these off for a few seconds at a time to compare.
@@ -64,6 +65,8 @@
         } catch (error) {
           console.warn('[orca-themer] touch failed', id, error)
           send({ type: 'log', message: `touch ${id} failed to start: ${error?.stack ?? error}` })
+          // Read by the launcher's checkup after an Orca update.
+          touchErrors.push({ id, error: String(error?.stack ?? error).slice(0, 300) })
         }
       }
     }
@@ -366,6 +369,13 @@
     log: (message) => send({ type: 'log', message: String(message) }),
     get state() {
       return state
+    },
+    get touchErrors() {
+      return touchErrors.slice()
+    },
+    // The launcher's one summary after an Orca update, shown only when something stopped working.
+    checkupNotice(text) {
+      whenReady(() => notice(text, 30000))
     }
   }
   send({ type: 'hello', url: location.href })

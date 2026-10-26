@@ -14,6 +14,7 @@ Orca 載入自己的程式檔時，啟動器可以用 CDP `Fetch` 換成修正�
 
 - 對不上（Orca 更新改了寫法）就回傳 `null`，原樣放行，並在 `themer.log` 寫 `code not found in this Orca build, skipped`
 - 同一段程式碼出現兩次（代表結構變了）也會放棄
+- Orca 改版後第一次啟動的健檢會把沒套上的修正（全部或其中一部分）列進同一則提醒
 - 測試在 `test/core.test.mjs`
 
 ## `claude-restart-after-switch`
