@@ -205,6 +205,8 @@
     })
     document.body.appendChild(root)
     renderPicker()
+    // After the open animation, so the launcher's one-off lookup does not cost it a frame.
+    setTimeout(() => send({ type: 'picker-open' }), 250)
   }
 
   addEventListener(
@@ -328,6 +330,16 @@
   window.__orcaThemer = {
     apply,
     openPicker,
+    // The launcher is about to reload this window: close the picker and say why, then resolve once that
+    // frame is painted (Chromium keeps showing it until the reloaded page paints).
+    beforeReload(text) {
+      document.getElementById(PICKER_ID)?.remove()
+      if (text && document.body) notice(text, 15000)
+      return new Promise((resolve) => {
+        setTimeout(resolve, 300)
+        requestAnimationFrame(() => requestAnimationFrame(resolve))
+      })
+    },
     // Registering an id again (a touch file was saved) stops the old version and starts the new one.
     registerTouch(id, touch) {
       if (running.has(id)) {

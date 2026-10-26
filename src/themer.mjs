@@ -224,17 +224,20 @@ async function syncTerminal() {
     const current = s.terminalThemeDark
     const ours = typeof current === 'string' && current.startsWith('custom:' + a.prefix)
     if (!a.want) {
-      if (ours) await api.set({ terminalThemeDark: a.restore ?? 'Ghostty Default Style Dark' })
-      return { ok: true, restoredTo: ours ? a.restore : null }
+      if (!ours) return { ok: true, patch: null }
+      const patch = { terminalThemeDark: a.restore ?? 'Ghostty Default Style Dark' }
+      await api.set(patch)
+      return { ok: true, patch }
     }
     const themes = (s.terminalCustomThemes ?? []).filter((t) => t.id !== a.want.id)
     themes.push({ id: a.want.id, name: a.want.name, source: 'manual', mode: 'dark', terminal: a.want.terminal, importedAt: new Date().toISOString(), sourceLabel: 'Orca Companion Kit' })
-    await api.set({ terminalCustomThemes: themes, terminalThemeDark: 'custom:' + a.want.id })
-    return { ok: true, previous: ours ? null : current }
+    const patch = { terminalCustomThemes: themes, terminalThemeDark: 'custom:' + a.want.id }
+    await api.set(patch)
+    return { ok: true, previous: ours ? null : current, patch }
   })(${args})`
   const r = await cdp.send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }, sessionId).catch((e) => ({ error: e.message }))
   const value = r?.result?.value
-  log('terminal sync', JSON.stringify(value ?? r?.exceptionDetails?.exception?.description ?? r?.error))
+  log('terminal sync', JSON.stringify(value ? { ...value, patch: value.patch && Object.keys(value.patch) } : r?.exceptionDetails?.exception?.description ?? r?.error))
   if (!value?.ok) return
   if (want) {
     if (value.previous) settings.terminalRestore = value.previous
@@ -243,13 +246,89 @@ async function syncTerminal() {
     settings.terminalAppliedFor = null
   }
   saveSettings()
-  // Why reload: Orca broadcasts a settings change to every window except the one that wrote it,
-  // so the writing window keeps its old terminal colors until it reads settings again.
-  // This is Orca's own View → Reload; terminals reattach to the daemon.
-  if (want || value.restoredTo) {
-    await cdp.send('Page.reload', {}, sessionId).catch((e) => log('reload failed', e.message))
-    log('reloaded main window to pick up the terminal palette')
-  }
+  if (!value.patch) return
+  // Orca tells every window about a settings change except the one that wrote it, so this window would
+  // keep its old terminal colors. Hand it the same "settings changed" message Orca sends the others:
+  // the terminals recolor in place, and nothing a reload resets (sidebar groups, open menus) is lost.
+  if (await announceSettingsChange(sessionId, value.patch)) return log('terminal palette applied in place')
+  // Fallback when that hook is gone in a new Orca: Orca's own View → Reload (terminals reattach to the
+  // daemon). Say so first; Chromium keeps showing the last frame until the reloaded page paints.
+  await cdp
+    .send('Runtime.evaluate', { expression: `window.__orcaThemer?.beforeReload?.(${JSON.stringify('換上終端機配色，視窗重新整理一下…')})`, awaitPromise: true }, sessionId)
+    .catch(() => {})
+  await cdp.send('Page.reload', {}, sessionId).catch((e) => log('reload failed', e.message))
+  log('reloaded main window to pick up the terminal palette')
+}
+
+// Electron's preload world of each Orca window, where Orca's ipcRenderer lives (sessionId -> contextId),
+// and the ipcRenderer found there (sessionId -> Promise<objectId | null>), looked up once per page load.
+const preloadContexts = new Map()
+const ipcHandles = new Map()
+
+// Finding it walks every object in the preload world (~1–3 s), so the picker warms it up when it opens.
+function findOrcaIpc(sessionId) {
+  const contextId = preloadContexts.get(sessionId)
+  if (!contextId) return Promise.resolve(null)
+  if (ipcHandles.has(sessionId)) return ipcHandles.get(sessionId)
+  const lookup = (async () => {
+    const group = `orca-themer-ipc-${contextId}`
+    try {
+      const proto = await cdp.send('Runtime.evaluate', { expression: 'Object.prototype', contextId, objectGroup: group }, sessionId)
+      if (!proto.result?.objectId) return null
+      const { objects } = await cdp.send('Runtime.queryObjects', { prototypeObjectId: proto.result.objectId, objectGroup: group }, sessionId)
+      const found = await cdp.send(
+        'Runtime.callFunctionOn',
+        {
+          objectId: objects.objectId,
+          objectGroup: group,
+          // Electron keeps an internal ipc emitter of the same shape; only Orca's listens for settings changes.
+          functionDeclaration: `function () {
+            return this.find((o) => {
+              try {
+                return typeof o.invoke === 'function' && typeof o.emit === 'function' && typeof o.listeners === 'function' && o.listeners('settings:changed').length > 0
+              } catch {
+                return false
+              }
+            }) ?? null
+          }`
+        },
+        sessionId
+      )
+      await cdp.send('Runtime.releaseObject', { objectId: objects.objectId }, sessionId).catch(() => {})
+      return found.result?.objectId ?? null
+    } catch (e) {
+      log('looking up Orca ipc failed', e.message)
+      return null
+    }
+  })()
+  ipcHandles.set(sessionId, lookup)
+  return lookup
+}
+
+function forgetPreloadContext(sessionId) {
+  preloadContexts.delete(sessionId)
+  ipcHandles.delete(sessionId)
+}
+
+// Emits Orca's own `settings:changed` IPC event inside one window, exactly what main sends the other
+// windows. Returns false when this Orca build has no such listener, so the caller can fall back.
+async function announceSettingsChange(sessionId, patch) {
+  const ipcId = await findOrcaIpc(sessionId)
+  if (!ipcId) return false
+  const r = await cdp
+    .send(
+      'Runtime.callFunctionOn',
+      {
+        objectId: ipcId,
+        functionDeclaration: `function (patch) { this.emit('settings:changed', { sender: this }, patch); return true }`,
+        arguments: [{ value: patch }],
+        returnByValue: true
+      },
+      sessionId
+    )
+    .catch((e) => ({ error: e.message }))
+  if (r.result?.value !== true) log('announce settings change failed', JSON.stringify(r.exceptionDetails?.exception?.description ?? r.error))
+  return r.result?.value === true
 }
 
 // ---------- notification sound sync ----------
@@ -330,11 +409,26 @@ cdp.on('Target.attachedToTarget', async ({ sessionId, targetInfo }) => {
   }
 })
 
-cdp.on('Target.detachedFromTarget', ({ sessionId }) => sessions.delete(sessionId))
+cdp.on('Target.detachedFromTarget', ({ sessionId }) => {
+  sessions.delete(sessionId)
+  forgetPreloadContext(sessionId)
+})
+cdp.on('Runtime.executionContextDestroyed', ({ executionContextId }, sessionId) => {
+  if (preloadContexts.get(sessionId) === executionContextId) forgetPreloadContext(sessionId)
+})
+cdp.on('Runtime.executionContextsCleared', (_, sessionId) => forgetPreloadContext(sessionId))
 
 // Every new main-world context of an Orca window gets the runtime; the runtime ignores a second copy.
 cdp.on('Runtime.executionContextCreated', ({ context }, sessionId) => {
-  if (!sessions.has(sessionId) || !context.auxData?.isDefault || !String(context.origin).startsWith('file://')) return
+  if (!sessions.has(sessionId) || !String(context.origin).startsWith('file://')) return
+  if (!context.auxData?.isDefault) {
+    // Electron's preload world; announceSettingsChange() reaches Orca's ipcRenderer through it.
+    if (context.auxData?.type === 'isolated' && /electron/i.test(context.name ?? '')) {
+      forgetPreloadContext(sessionId)
+      preloadContexts.set(sessionId, context.id)
+    }
+    return
+  }
   cdp
     .send('Runtime.evaluate', { expression: pageScript(), contextId: context.id }, sessionId)
     .then((r) => log('runtime evaluated', r.exceptionDetails ? `error: ${r.exceptionDetails.exception?.description?.slice(0, 200)}` : 'ok'))
@@ -379,6 +473,8 @@ cdp.on('Runtime.bindingCalled', async ({ name, payload: raw }, sessionId) => {
     return
   }
   if (message.type === 'log') return log('page', String(message.message).slice(0, 300))
+  // The picker opened: find Orca's ipc now, so picking a theme recolors the terminal without waiting.
+  if (message.type === 'picker-open') return void findOrcaIpc(sessionId)
   if (message.type === 'select-theme') {
     const theme = library.themes.find((t) => t.id === message.id) ?? null
     settings.themeId = theme?.id ?? null
