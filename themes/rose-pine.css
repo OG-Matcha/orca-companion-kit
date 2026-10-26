@@ -1,0 +1,47 @@
+/**
+ * @name Rosé Pine
+ * @author rosé pine palette
+ * @description 低飽和的玫瑰松林
+ */
+html.dark {
+  --background: #191724;
+  --foreground: #e0def4;
+  --editor-surface: #191724;
+  --card: #1f1d2e;
+  --card-foreground: #e0def4;
+  --popover: #1f1d2e;
+  --popover-foreground: #e0def4;
+  --primary: #ebbcba;
+  --primary-foreground: #191724;
+  --secondary: #26233a;
+  --secondary-foreground: #e0def4;
+  --muted: #26233a;
+  --muted-foreground: #908caa;
+  --accent: #403d52;
+  --accent-foreground: #e0def4;
+  --border: rgb(224 222 244 / 0.08);
+  --input: rgb(224 222 244 / 0.15);
+  --ring: #c4a7e7;
+  --sidebar: #1f1d2e;
+  --sidebar-foreground: #e0def4;
+  --sidebar-primary: #eb6f92;
+  --sidebar-primary-foreground: #191724;
+  --sidebar-accent: #26233a;
+  --sidebar-accent-foreground: #e0def4;
+  --sidebar-border: rgb(224 222 244 / 0.08);
+  --sidebar-ring: #c4a7e7;
+  --worktree-sidebar: #1f1d2e;
+  --worktree-sidebar-foreground: #e0def4;
+  --worktree-sidebar-accent: #26233a;
+  --worktree-sidebar-accent-foreground: #e0def4;
+  --worktree-sidebar-border: rgb(224 222 244 / 0.08);
+  --worktree-sidebar-ring: #c4a7e7;
+  --ai-action-accent: #c4a7e7;
+  --agent-working: #9ccfd8;
+  --destructive: #eb6f92;
+  --status-success: #9ccfd8;
+  --status-warning: #f6c177;
+  --callout-note: #31748f;
+  --callout-important: #c4a7e7;
+  color-scheme: dark;
+}

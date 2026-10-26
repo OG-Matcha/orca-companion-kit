@@ -1,0 +1,47 @@
+/**
+ * @name Catppuccin Mocha
+ * @author catppuccin palette
+ * @description 柔和的粉彩暗色
+ */
+html.dark {
+  --background: #1e1e2e;
+  --foreground: #cdd6f4;
+  --editor-surface: #1e1e2e;
+  --card: #181825;
+  --card-foreground: #cdd6f4;
+  --popover: #181825;
+  --popover-foreground: #cdd6f4;
+  --primary: #cba6f7;
+  --primary-foreground: #11111b;
+  --secondary: #313244;
+  --secondary-foreground: #cdd6f4;
+  --muted: #313244;
+  --muted-foreground: #a6adc8;
+  --accent: #45475a;
+  --accent-foreground: #cdd6f4;
+  --border: rgb(205 214 244 / 0.09);
+  --input: rgb(205 214 244 / 0.16);
+  --ring: #b4befe;
+  --sidebar: #181825;
+  --sidebar-foreground: #cdd6f4;
+  --sidebar-primary: #cba6f7;
+  --sidebar-primary-foreground: #11111b;
+  --sidebar-accent: #313244;
+  --sidebar-accent-foreground: #cdd6f4;
+  --sidebar-border: rgb(205 214 244 / 0.09);
+  --sidebar-ring: #b4befe;
+  --worktree-sidebar: #1b1b2b;
+  --worktree-sidebar-foreground: #cdd6f4;
+  --worktree-sidebar-accent: #313244;
+  --worktree-sidebar-accent-foreground: #cdd6f4;
+  --worktree-sidebar-border: rgb(205 214 244 / 0.09);
+  --worktree-sidebar-ring: #b4befe;
+  --ai-action-accent: #f5c2e7;
+  --agent-working: #89b4fa;
+  --destructive: #f38ba8;
+  --status-success: #a6e3a1;
+  --status-warning: #f9e2af;
+  --callout-note: #89b4fa;
+  --callout-important: #cba6f7;
+  color-scheme: dark;
+}

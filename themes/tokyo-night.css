@@ -1,0 +1,47 @@
+/**
+ * @name Tokyo Night
+ * @author tokyo-night palette
+ * @description 東京夜景的藍紫霓虹
+ */
+html.dark {
+  --background: #1a1b26;
+  --foreground: #c0caf5;
+  --editor-surface: #1a1b26;
+  --card: #16161e;
+  --card-foreground: #c0caf5;
+  --popover: #16161e;
+  --popover-foreground: #c0caf5;
+  --primary: #7aa2f7;
+  --primary-foreground: #15161e;
+  --secondary: #292e42;
+  --secondary-foreground: #c0caf5;
+  --muted: #292e42;
+  --muted-foreground: #a9b1d6;
+  --accent: #33467c;
+  --accent-foreground: #c0caf5;
+  --border: rgb(192 202 245 / 0.08);
+  --input: rgb(192 202 245 / 0.15);
+  --ring: #7dcfff;
+  --sidebar: #16161e;
+  --sidebar-foreground: #c0caf5;
+  --sidebar-primary: #bb9af7;
+  --sidebar-primary-foreground: #15161e;
+  --sidebar-accent: #292e42;
+  --sidebar-accent-foreground: #c0caf5;
+  --sidebar-border: rgb(192 202 245 / 0.08);
+  --sidebar-ring: #7dcfff;
+  --worktree-sidebar: #1f2335;
+  --worktree-sidebar-foreground: #c0caf5;
+  --worktree-sidebar-accent: #292e42;
+  --worktree-sidebar-accent-foreground: #c0caf5;
+  --worktree-sidebar-border: rgb(192 202 245 / 0.08);
+  --worktree-sidebar-ring: #7dcfff;
+  --ai-action-accent: #bb9af7;
+  --agent-working: #7dcfff;
+  --destructive: #f7768e;
+  --status-success: #9ece6a;
+  --status-warning: #e0af68;
+  --callout-note: #7aa2f7;
+  --callout-important: #bb9af7;
+  color-scheme: dark;
+}
