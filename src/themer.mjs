@@ -470,6 +470,13 @@ if (process.env.ORCA_THEMER_DEV === '1') {
           cdp.off('Page.screencastFrame', onFrame)
           fs.writeFileSync(path.join(command.dir, 'frames.json'), JSON.stringify(frames))
           result = { ok: true, frames: frames.length }
+        } else if (command.cmd === 'mouse') {
+          // Real (trusted) pointer input, for checks and docs footage: [{ type, x, y, button?, buttons?, clickCount?, wait? }]
+          for (const { wait = 0, ...event } of command.events) {
+            await cdp.send('Input.dispatchMouseEvent', { button: 'none', ...event }, sessionId)
+            if (wait) await new Promise((r) => setTimeout(r, wait))
+          }
+          result = { ok: true }
         } else if (command.cmd === 'key') {
           for (const type of ['keyDown', 'keyUp'])
             await cdp.send('Input.dispatchKeyEvent', { type, ...command.event }, sessionId)
