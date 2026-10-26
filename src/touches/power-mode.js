@@ -161,7 +161,10 @@
         clearTimeout(comboTimer)
         comboTimer = setTimeout(() => {
           count = 0
-          combo.animate([{ opacity: combo.style.opacity || 1 }, { opacity: 0 }], { duration: 400, fill: 'forwards' })
+          if (combo.style.opacity === '0') return
+          // No fill: a forwards-filling fade could outlive cancel() and keep the counter invisible for good.
+          combo.animate([{ opacity: combo.style.opacity || 1 }, { opacity: 0 }], { duration: 400 })
+          combo.style.opacity = '0'
         }, COMBO_RESET_MS)
         // Other touches (a companion, for one) can react to a hot streak.
         dispatchEvent(new CustomEvent('orca-themer:combo', { detail: count }))
