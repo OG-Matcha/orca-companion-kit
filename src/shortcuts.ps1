@@ -36,4 +36,7 @@ foreach ($place in $places) {
     Write-Output "retargeted $($_.FullName)"
   }
 }
-$manifest | ConvertTo-Json | Set-Content $manifestFile -Encoding utf8
+# Written only when a new original was backed up, so a routine check never touches the file
+# (two launchers writing it at once failed with "file in use").
+$json = $manifest | ConvertTo-Json
+if (-not (Test-Path $manifestFile) -or (Get-Content $manifestFile -Raw).Trim() -ne $json.Trim()) { $json | Set-Content $manifestFile -Encoding utf8 }
