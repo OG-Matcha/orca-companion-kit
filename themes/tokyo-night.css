@@ -45,3 +45,15 @@ html.dark {
   --callout-important: #bb9af7;
   color-scheme: dark;
 }
+
+/* The file editor (Monaco) brings its own colors; its background follows the theme instead. */
+html.dark .monaco-editor,
+html.dark .monaco-diff-editor,
+html.dark .monaco-component {
+  --vscode-editor-background: var(--background) !important;
+  --vscode-editorGutter-background: var(--background) !important;
+  --vscode-minimap-background: var(--background) !important;
+  --vscode-editorStickyScroll-background: var(--background) !important;
+  --vscode-editor-lineHighlightBackground: color-mix(in srgb, var(--accent) 40%, transparent) !important;
+  --vscode-editorLineNumber-foreground: var(--muted-foreground) !important;
+}

@@ -75,6 +75,7 @@
 | `.bg-worktree-sidebar[data-os-file-drop-owner]` | worktree 側欄（寵物預設待在它右下角） |
 | `[data-sonner-toast]` | 通知。**它的 `::before`、`::after` sonner 自己在用**，裝飾請用 `background` 疊圖層 |
 | `[data-panel-resize-handle-id]`、`[role='separator']` | 面板之間可拖曳的分隔線 |
+| `.monaco-editor`、`.monaco-diff-editor` | 檔案編輯器（Monaco）。它不吃 Orca 的變數，背景是自己的 `--vscode-editor-background`；在這兩個選擇器上用 `!important` 改這些 `--vscode-*` 變數（四套內建主題結尾都有範例） |
 
 ## 終端機配色
 

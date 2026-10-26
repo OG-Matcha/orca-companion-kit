@@ -66,3 +66,15 @@ html[data-orca-touch-custom-cursor] *:not([data-panel-resize-handle-id], [data-r
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' width='24' height='24'%3E%3Cpath d='M2 2 L2 17.5 L6.2 13.6 L9 20 L11.8 18.8 L9.1 12.6 L14.8 12.4 Z' fill='%23fff6e8' stroke='%233f3a52' stroke-width='1.4' stroke-linejoin='round'/%3E%3Cg fill='%23ffffff' stroke='%23c9c1e6' stroke-width='.8'%3E%3Ccircle cx='17' cy='17.5' r='3'/%3E%3Ccircle cx='20' cy='16.2' r='2.6'/%3E%3Ccircle cx='19.6' cy='19.4' r='2.2'/%3E%3C/g%3E%3C/svg%3E") 2 2,
     default !important;
 }
+
+/* The file editor (Monaco) brings its own colors; its background follows the theme instead. */
+html.dark .monaco-editor,
+html.dark .monaco-diff-editor,
+html.dark .monaco-component {
+  --vscode-editor-background: var(--background) !important;
+  --vscode-editorGutter-background: var(--background) !important;
+  --vscode-minimap-background: var(--background) !important;
+  --vscode-editorStickyScroll-background: var(--background) !important;
+  --vscode-editor-lineHighlightBackground: color-mix(in srgb, var(--accent) 40%, transparent) !important;
+  --vscode-editorLineNumber-foreground: var(--muted-foreground) !important;
+}
