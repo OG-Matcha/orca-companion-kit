@@ -2,9 +2,28 @@
 
 讓 AI agent（Claude Code、Codex……）幫你做一套自己的 [Orca](https://github.com/stablyai/orca) 外觀：主題配色、會陪你寫程式的桌面小寵物、自訂游標，必要時再加終端機配色和通知音效。做好的東西只會放在你的電腦裡（`~/.orca/themer/`），Orca 更新後照樣能用。
 
-![範例寵物 Puff、範例主題「棉花夜空」和 Ctrl+Alt+T 選單](docs/images/puff.png)
+![Orca 套上範例主題「棉花夜空」：終端機打字時迸出火花、右上角是連擊數，左下角是範例寵物 Puff](docs/images/hero.png)
 
-<sub>示意圖：在瀏覽器測試頁裡跑同一套執行環境截的圖，不是 Orca 的實際畫面。</sub>
+<sub>Orca 實際畫面：範例主題「棉花夜空 Cotton Sky」加上範例寵物 Puff。專案是另外建的示範資料夾。</sub>
+
+## 實際畫面
+
+以下都是照「快速開始」裝好之後，在 Windows 版 Orca 裡錄的。
+
+| | |
+| --- | --- |
+| ![摸 Puff 會冒愛心；抓起來甩出去，它會飛一段再自己走回原位](docs/images/puff-pet-throw.gif) | ![終端機送出一行字，Puff 會回話；雙擊它就一路跟著游標走](docs/images/puff-follow-react.gif) |
+| **摸摸、甩出去。** 游標在 Puff 身上來回摸會冒愛心；用力甩出去，它飛一段再自己走回家。 | **會回話、會跟著走。** 終端機送出的字裡有它認得的詞（這裡是 lunch），它會回一句。雙擊它就跟著游標走，按右鍵讓它停下。 |
+| ![終端機打字時從游標迸出小火花，右上角累計連擊數](docs/images/typing-sparks.gif) | ![按 Ctrl+Alt+T 開選單，在 Rosé Pine、Tokyo Night、棉花夜空之間切換](docs/images/theme-picker.gif) |
+| **打字特效。** 終端機打字時從游標迸出小火花，右上角算連擊數，停手一陣子就淡掉。 | **Ctrl+Alt+T 換主題。** 點一下就換，不用重開 Orca。換完視窗會自己重新載入一次，讓終端機配色跟上（錄影裡剪掉了這一段）。 |
+
+另外附了三套經典主題，可以直接用，也可以拿來當範本改：
+
+| Catppuccin Mocha | Rosé Pine | Tokyo Night |
+| --- | --- | --- |
+| ![Catppuccin Mocha 主題](docs/images/theme-catppuccin-mocha.png) | ![Rosé Pine 主題](docs/images/theme-rose-pine.png) | ![Tokyo Night 主題](docs/images/theme-tokyo-night.png) |
+
+<sub>錄影抓不到系統游標，動圖裡的游標是事後依實際指標位置疊上去的，用的就是棉花夜空的自訂游標圖（`examples/cursors/cotton-pointer.svg`）。動作是用腳本送進 Orca 的指標和按鍵事件，Puff 的反應都是它自己的程式跑出來的。</sub>
 
 ## 它做了什麼
 
