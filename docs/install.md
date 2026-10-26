@@ -68,6 +68,25 @@ node src/themer.mjs --user-data-dir=$env:TEMP\orca-trial
 
 開發用：`$env:ORCA_THEMER_DEV='1'` 時，可以用 `node tools/dev.mjs <root> '{"cmd":"eval","expr":"1+1"}'` 在主視窗執行指令或截圖（`{"cmd":"screenshot","out":"C:\\path\\shot.png"}`），或錄一段畫面做文件用的動圖（`{"cmd":"screencast","dir":"C:\\frames","ms":6000}`，JPEG 影格加 `frames.json` 時間戳），也能送真的滑鼠事件（`{"cmd":"mouse","events":[{"type":"mouseMoved","x":200,"y":300,"wait":50}]}`，欄位同 CDP `Input.dispatchMouseEvent`）。
 
+## 推上 GitHub 之前：隱私檢查
+
+這個 repo 是公開的，所以每次推到 `main` 或開 PR，GitHub Actions 都會跑一輪 CI：`npm test`、`npm run check -- --repo`，再加一道隱私檢查。本機也能先跑：
+
+```powershell
+npm run guard
+```
+
+它會看 repo 裡所有檔案（包括還沒 commit、沒被 `.gitignore` 排除的），以及還沒推上去的 commit，找出這幾種東西：
+
+- 個人用字：名字、帳號、私人專案的詞。清單以 SHA-256 雜湊存在 `tools/guard.mjs`，不寫明文，免得清單本身就洩漏了。要加詞，跑 `node tools/guard.mjs --hash <詞>`，照檔頭說明貼進去。
+- 真實的使用者資料夾，例如 `C:\Users\` 後面接真名。`<you>`、`%USERNAME%` 這類佔位字不算。
+- email：只放行 `@users.noreply.github.com`、範例網域和 `noreply@` 這類機器人地址。
+- 長得像金鑰或 token 的字串。
+- 圖片也會查：PNG 的文字區塊（壓縮過的也解開來看）、GIF 註解、JPEG 的 EXIF／XMP。
+- commit 作者的 email 必須是 GitHub noreply 地址，commit 訊息也照上面的規則查。
+
+誤判的話（個人用字除外），在那一行加上 `privacy-guard: allow` 註解就會跳過。
+
 ## 疑難排解
 
 | 症狀 | 處理 |

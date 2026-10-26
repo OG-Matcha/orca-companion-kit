@@ -13,6 +13,7 @@
     "check": "node tools/check.mjs",
     "cursor": "node tools/cursor-css.mjs",
     "chime": "node tools/make-chime.mjs",
+    "guard": "node tools/guard.mjs",
     "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {

@@ -38,6 +38,7 @@ Follow **[docs/ai-guide.md](docs/ai-guide.md)**: interview (reference images, pa
 npm test                     # engine tests
 npm run check                # lint ~/.orca/themer (perf traps, syntax, headers, palettes)
 npm run check -- --repo      # lint this repo's themes and examples
+npm run guard                # privacy guard: personal words, user paths, emails, secrets (CI runs it too)
 npm run example              # copy the examples into ~/.orca/themer
 npm run cursor -- c.svg 2 2  # cursor SVG -> CSS (1x/2x image-set, hotspot)
 npm run chime -- out.wav 1046.5 1318.5
