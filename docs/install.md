@@ -66,7 +66,7 @@ node src/themer.mjs --user-data-dir=$env:TEMP\orca-trial
 
 用獨立的設定資料夾開第二個 Orca。這種試跑不會關掉原本的 Orca，也不會動到捷徑。也可以設定 `ORCA_COMPANION_NO_SHORTCUTS=1`，只關掉捷徑管理。
 
-開發用：`$env:ORCA_THEMER_DEV='1'` 時，可以用 `node tools/dev.mjs <root> '{"cmd":"eval","expr":"1+1"}'` 在主視窗執行指令或截圖（`{"cmd":"screenshot","out":"C:\\path\\shot.png"}`）。
+開發用：`$env:ORCA_THEMER_DEV='1'` 時，可以用 `node tools/dev.mjs <root> '{"cmd":"eval","expr":"1+1"}'` 在主視窗執行指令或截圖（`{"cmd":"screenshot","out":"C:\\path\\shot.png"}`），或錄一段畫面做文件用的動圖（`{"cmd":"screencast","dir":"C:\\frames","ms":6000}`，JPEG 影格加 `frames.json` 時間戳）。
 
 ## 疑難排解
 

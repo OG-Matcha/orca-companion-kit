@@ -452,6 +452,24 @@ if (process.env.ORCA_THEMER_DEV === '1') {
         } else if (command.cmd === 'eval') {
           const r = await cdp.send('Runtime.evaluate', { expression: command.expr, returnByValue: true, awaitPromise: true }, sessionId)
           result = { ok: !r.exceptionDetails, value: r.result?.value, error: r.exceptionDetails?.exception?.description }
+        } else if (command.cmd === 'screencast') {
+          // Records the page (not the window frame) for docs: JPEG frames plus their timestamps.
+          fs.mkdirSync(command.dir, { recursive: true })
+          const frames = []
+          const onFrame = (params, sid) => {
+            if (sid !== sessionId) return
+            const name = `f${String(frames.length).padStart(5, '0')}.jpg`
+            fs.writeFileSync(path.join(command.dir, name), Buffer.from(params.data, 'base64'))
+            frames.push({ name, t: params.metadata.timestamp })
+            cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }, sessionId).catch(() => {})
+          }
+          cdp.on('Page.screencastFrame', onFrame)
+          await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 90, maxWidth: command.maxWidth ?? 1920, maxHeight: command.maxHeight ?? 1200, everyNthFrame: 1 }, sessionId)
+          await new Promise((r) => setTimeout(r, command.ms ?? 5000))
+          await cdp.send('Page.stopScreencast', {}, sessionId)
+          cdp.off('Page.screencastFrame', onFrame)
+          fs.writeFileSync(path.join(command.dir, 'frames.json'), JSON.stringify(frames))
+          result = { ok: true, frames: frames.length }
         } else if (command.cmd === 'key') {
           for (const type of ['keyDown', 'keyUp'])
             await cdp.send('Input.dispatchKeyEvent', { type, ...command.event }, sessionId)

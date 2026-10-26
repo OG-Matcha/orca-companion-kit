@@ -9,7 +9,7 @@ const id = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 fs.mkdirSync(dir, { recursive: true })
 fs.writeFileSync(path.join(dir, `${id}.cmd.json`), json)
 const out = path.join(dir, `${id}.result.json`)
-const until = Date.now() + 20000
+const until = Date.now() + 20000 + (JSON.parse(json).ms ?? 0)
 while (!fs.existsSync(out)) {
   if (Date.now() > until) {
     console.error('timeout')
