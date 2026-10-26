@@ -160,6 +160,9 @@ setTimeout(retargetShortcuts, 5000)
 
 child.on('exit', (code) => {
   log('Orca exited', code)
+  // The dev channel belongs to this Orca; a launcher still waiting must not answer for the next one.
+  clearInterval(devTimer)
+  if (!manageShortcuts) process.exit(0)
   // An update installs while Orca is closed: keep checking for a few minutes so the next launch is themed.
   const until = Date.now() + 180000
   const again = async () => {
@@ -424,18 +427,22 @@ for (const kind of ['themes', 'snippets', 'terminal', 'touches']) {
   watcher.on('error', (e) => log('watch error', kind, e.message))
 }
 
+let devTimer = null
 // Dev-only control for automated checks: drop {cmd,...}.json into ROOT/dev; the result lands beside it.
 if (process.env.ORCA_THEMER_DEV === '1') {
   const devDir = path.join(ROOT, 'dev')
   fs.mkdirSync(devDir, { recursive: true })
   const mainSession = async () => {
+    const seen = []
     for (const sessionId of sessions.keys()) {
-      const info = await cdp.send('Target.getTargetInfo', {}, sessionId).catch(() => null)
+      const info = await cdp.send('Target.getTargetInfo', {}, sessionId).catch((e) => ({ error: e.message }))
+      seen.push(info?.targetInfo?.url ?? info?.error)
       if (/\/out\/renderer\/index\.html/i.test(info?.targetInfo?.url ?? '')) return sessionId
     }
+    log('dev: no main window among', JSON.stringify(seen))
     return null
   }
-  setInterval(async () => {
+  devTimer = setInterval(async () => {
     for (const name of fs.readdirSync(devDir).filter((n) => n.endsWith('.cmd.json'))) {
       const file = path.join(devDir, name)
       const out = file.replace(/\.cmd\.json$/, '.result.json')
