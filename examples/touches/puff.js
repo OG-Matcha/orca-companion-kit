@@ -1,0 +1,138 @@
+// Puff: the example companion. A small cloud-sheep that naps on your sidebar and drizzles when worried.
+// An original character made for this kit (CC0-style: copy it, change it, make it yours).
+//
+// This file is all a companion needs: an SVG with named groups, the selectors for those groups, a few
+// lines, a few words it listens for, and its own acts. Everything else (drag, throw, follow, gaze, moods,
+// speech limits, bond memory, agent tabs...) comes from src/touches/companion.js.
+//
+// To use it: `npm run example` copies this file to ~/.orca/themer/touches/, and the example theme lists
+// `puff` in its @touches. To make your own, copy this file under a new name and change the id.
+;(() => {
+  const T = window.__orcaThemer
+  if (!T?.registerCompanion) return
+
+  // viewBox 120x120; drawn at 64px. Ids are prefixed (puff-) so they cannot clash with Orca or other pets.
+  // Named groups (the class names) are what `parts` below points at.
+  const SVG = `<svg viewBox="0 0 120 120" overflow="visible" style="filter:drop-shadow(0 2px 4px rgb(0 0 0 / .25))">
+    <defs>
+      <radialGradient id="puff-wool" cx="40%" cy="30%" r="75%">
+        <stop offset="0" stop-color="#ffffff"/><stop offset=".6" stop-color="#f4f1fb"/><stop offset="1" stop-color="#d9d3ee"/>
+      </radialGradient>
+      <linearGradient id="puff-face" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#5b5470"/><stop offset="1" stop-color="#3f3a52"/>
+      </linearGradient>
+    </defs>
+    <g class="puff-legs" fill="#4a4460">
+      <rect x="44" y="86" width="7" height="14" rx="3.5"/><rect x="56" y="88" width="7" height="13" rx="3.5"/>
+      <rect x="66" y="88" width="7" height="13" rx="3.5"/><rect x="77" y="86" width="7" height="14" rx="3.5"/>
+    </g>
+    <g class="puff-body" fill="url(#puff-wool)" stroke="#ffffff" stroke-opacity=".9" stroke-width="1.2">
+      <circle cx="38" cy="64" r="19"/><circle cx="82" cy="64" r="19"/><circle cx="48" cy="80" r="17"/>
+      <circle cx="74" cy="80" r="17"/><circle cx="60" cy="54" r="26"/><circle cx="60" cy="80" r="16"/>
+    </g>
+    <g class="puff-tuft" fill="url(#puff-wool)" stroke="#ffffff" stroke-width="1">
+      <circle cx="52" cy="31" r="8"/><circle cx="63" cy="27" r="9"/><circle cx="71" cy="33" r="6.5"/>
+    </g>
+    <g class="puff-ear-l" data-origin="right center"><ellipse cx="38" cy="58" rx="9" ry="4.6" transform="rotate(-24 38 58)" fill="#5b5470"/><ellipse cx="39" cy="58" rx="5" ry="2.2" transform="rotate(-24 39 58)" fill="#f2b8c8"/></g>
+    <g class="puff-ear-r" data-origin="left center"><ellipse cx="82" cy="58" rx="9" ry="4.6" transform="rotate(24 82 58)" fill="#5b5470"/><ellipse cx="81" cy="58" rx="5" ry="2.2" transform="rotate(24 81 58)" fill="#f2b8c8"/></g>
+    <ellipse cx="60" cy="64" rx="17" ry="16" fill="url(#puff-face)"/>
+    <g class="puff-eyes" fill="#ffffff">
+      <circle cx="53.5" cy="62" r="2.8"/><circle cx="66.5" cy="62" r="2.8"/>
+      <circle cx="54.4" cy="61" r=".9" fill="#5b5470"/><circle cx="67.4" cy="61" r=".9" fill="#5b5470"/>
+    </g>
+    <g class="puff-eyes-happy" fill="none" stroke="#ffffff" stroke-width="1.8" stroke-linecap="round">
+      <path d="M50.5 63q3-3.6 6 0"/><path d="M63.5 63q3-3.6 6 0"/>
+    </g>
+    <g class="puff-eyes-sleep" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round">
+      <path d="M50.5 62q3 2.6 6 0"/><path d="M63.5 62q3 2.6 6 0"/>
+    </g>
+    <g fill="#f2a7bd" opacity=".55"><ellipse cx="49" cy="70" rx="3.2" ry="1.8"/><ellipse cx="71" cy="70" rx="3.2" ry="1.8"/></g>
+    <path d="M57.5 70.5q2.5 2 5 0" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="1.2" stroke-linecap="round"/>
+  </svg>`
+
+  // A small rain cloud over its head, for when it is worried. Plain DOM + WAAPI, cleaned up on finish.
+  function drizzle(api) {
+    const { host, center, size } = api
+    const c = center()
+    for (let i = 0; i < 6; i++) {
+      const drop = document.createElement('div')
+      drop.style.cssText = `position:absolute;left:${c.x - 14 * size + Math.random() * 28 * size}px;top:${c.y - 40 * size}px;width:3px;height:7px;border-radius:2px;background:#9fc4ff;pointer-events:none`
+      host.appendChild(drop)
+      drop.animate([{ transform: 'translateY(0)', opacity: 0.9 }, { transform: `translateY(${26 * size}px)`, opacity: 0 }], { duration: 700, delay: i * 120, easing: 'ease-in' }).onfinish = () => drop.remove()
+    }
+  }
+
+  T.registerCompanion({
+    id: 'puff',
+    label: '棉花羊 Puff',
+    title: 'Puff',
+    // Typing one of these in a line you send makes it perk up (case-insensitive, plain text).
+    names: ['puff', '棉花羊'],
+    svg: SVG,
+    size: 64,
+    parts: {
+      eyes: '.puff-eyes',
+      happyEyes: '.puff-eyes-happy',
+      sleepEyes: '.puff-eyes-sleep',
+      ears: '.puff-ear-l, .puff-ear-r', // each ear pivots at its own data-origin
+      flutter: '.puff-tuft' // the idle "breathing" part
+    },
+    colors: { sparkle: '#fff6e8', heart: '#f6b3c8', note: '#e8e4ff', trail: '#fff6e8' },
+    // Its signature move: a squashy double bounce.
+    signature: 'boing',
+    acts: {
+      boing: {
+        weight: (c) => 3 + c.mood.happy * 2,
+        run: (api) => {
+          const { act, t, at, animateParts } = api
+          act(at([t(0, 0), t(0, 3, 0, 1.12, 0.86), t(0, -14, 0, 0.92, 1.1), t(0, 2, 0, 1.08, 0.9), t(0, -6, 0, 0.96, 1.04), t(0, 0)], [0, 0.15, 0.4, 0.6, 0.8, 1]), 1100)
+          animateParts('flutter', [{ transform: 'translateY(0)' }, { transform: 'translateY(-3px)' }, { transform: 'translateY(0)' }], { duration: 1100, composite: 'add' })
+        }
+      },
+      // Fluffs up its wool, holds it, and lets the air out.
+      puffUp: {
+        weight: (c) => 2 + c.mood.curious,
+        run: ({ act, t, at }) => act(at([t(0, 0), t(0, -2, 0, 1.16, 1.12), t(0, -2, 0, 1.16, 1.12), t(0, 0)], [0, 0.3, 0.7, 1]), 1600)
+      },
+      // A worried little rain cloud.
+      drizzle: {
+        weight: (c) => c.mood.worried * 5,
+        run: (api) => {
+          api.act([api.t(0, 0), api.t(0, 3, -4), api.t(0, 3, 4), api.t(0, 0)], 1400)
+          drizzle(api)
+        }
+      },
+      // The built-in `chaseStar` fits a sheep less; take it out.
+      chaseStar: null
+    },
+    // Replaces the built-in "worried" reaction (a word like "bug" or "error" in what you sent).
+    reactions: {
+      worried: (api) => {
+        api.emote('worried')
+        api.feel('worried', 0.2)
+        api.acts.drizzle()
+      }
+    },
+    words: [
+      // Checked before the built-in ones. `react` is an act or reaction name, or a function(api).
+      { re: /草|grass|lunch|午餐|吃飯/i, react: (api) => (api.emote('happy'), api.acts.boing(), api.say('有草嗎？我也要。')) }
+    ],
+    lines: {
+      idle: ['今天的雲，軟軟的。', '我在這裡曬太陽。', '慢慢來，不急。', '你打字好像在下小雨。', '要不要伸個懶腰？'],
+      night: ['星星出來了。', '夜裡的風比較涼，記得加件衣服。'],
+      done: ['做完了！去看看吧。', '好耶，完成了。'],
+      failed: ['沒關係，再試一次。', '我陪你一起看看。'],
+      welcome: ['你回來了！', '歡迎回來，我有乖乖等。'],
+      name: ['咩？叫我嗎？', '我在！'],
+      late: ['這麼晚了，早點休息好不好？', '比平常晚了呢，別太累。'],
+      greeting: {
+        morning: ['早安，今天也一起加油。'],
+        noon: ['午安，記得吃飯。'],
+        afternoon: ['下午好，喝口水吧。'],
+        evening: ['晚上好。'],
+        night: ['這麼晚還在呀……']
+      },
+      milestone: ['這是我們一起的第 {n} 天！']
+    }
+  })
+})()

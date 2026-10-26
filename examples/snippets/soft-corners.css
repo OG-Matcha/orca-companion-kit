@@ -1,0 +1,9 @@
+/**
+ * @name 圓角一點
+ * @description 卡片、選單、輸入框的圓角稍微放大（任何主題都能疊）
+ */
+/* A snippet is a small CSS file you can switch on with any theme (Ctrl+Alt+T → 片段).
+   Only variables: Orca derives its radii from --radius. */
+:root {
+  --radius: 0.75rem;
+}
