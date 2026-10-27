@@ -49,7 +49,15 @@ Themes and touches run inside Orca's renderer, on the same thread as your typing
 13. **動畫只動 `transform` 和 `opacity`（WAAPI 或 CSS）。**
     不要動 `left`／`top`／`width`，也不要每一格改 `box-shadow`／`filter`。真的需要每一格計算的動作（甩出去、跟著游標）才用 `requestAnimationFrame`，停下來就結束迴圈。
 
-14. **尊重 `prefers-reduced-motion`。**
+14. **一直循環的動畫不要放在 SVG 裡的 `<g>` 上。**
+    Chromium 沒辦法把 SVG 子元素的 `transform` 動畫交給合成器，每一格都要把整張 SVG（連同 `drop-shadow`）重新排版、重畫。寵物的翅膀和耳朵這樣動，閒置時每分鐘吃掉約 10 秒主執行緒，打字也跟著變慢。要一直動的部位，拆成自己的 HTML 方塊（一個 `div` 包一張同 `viewBox` 的 SVG），疊回原位。
+    *No always-on loop on an SVG group: it re-lays-out and repaints the whole SVG every frame (~10 s of main-thread time a minute, measured). Give the part its own HTML box.*
+
+15. **循環動畫的元素上，別讓其他動畫跟它重疊。**
+    無限循環如果在同一個元素還有別的動畫時開始，或之後被疊上別的動畫（`composite: 'add'` 的小動作、`fill: 'forwards'` 的亮燈），Chromium 會把它標成不相容，從此一直在主執行緒跑，其他動畫結束了也不會回到合成器；`pause()` 再 `play()` 也沒用。做法：等元素上只剩這個循環時，用同樣的 keyframes、timing、`currentTime` 重建一份新的（看不出跳動），再取消舊的。另外，被一個已結束、`fill: 'forwards'` 的同屬性動畫蓋住的循環雖然看不到，每一格仍然要算，直接拿掉。
+    *A loop that overlaps another animation on the same element stays on the main thread for good (~7 s a minute, measured); recreate it once it is alone. A loop hidden under a finished `fill: 'forwards'` animation still costs a frame every frame.*
+
+16. **尊重 `prefers-reduced-motion`。**
     系統設定「減少動態」時，執行環境本來就不會啟動任何 touch；CSS 動畫請自己加上 media query。
 
 ## 怎麼確認
