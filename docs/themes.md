@@ -123,9 +123,9 @@ npm run chime -- ~/.orca/themer/sounds/<主題 id>.wav 1046.5 1318.5 1568
 
 這會用正弦波合成一段鈴聲（你擁有它的全部權利）。在 `@touches` 加上 `theme-sound`，選這個主題時它就會變成 Orca 的通知音效。也可以放你自己錄的 `.wav`。
 
-## 圖片素材
+## 圖片與音檔素材
 
-`~/.orca/themer/assets/<主題 id>/` 裡的圖片會自動變成 CSS 變數：`portrait.png` 對應 `var(--asset-portrait)`。這些圖只會留在你的電腦上。
+`~/.orca/themer/assets/<主題 id>/` 裡的圖片會自動變成 CSS 變數：`portrait.png` 對應 `var(--asset-portrait)`。音檔（`.ogg`、`.mp3`、`.m4a`、`.wav`）也一樣：`lullaby.ogg` 對應 `--asset-lullaby`，寵物可以用 `api.asset('lullaby')` 拿到網址來放（見 [companion-api.md](companion-api.md#用自己的音檔唱歌)）。這些檔案只會留在你的電腦上，請用你有權使用的素材。
 
 ```css
 html.dark .bg-worktree-sidebar[data-os-file-drop-owner] {

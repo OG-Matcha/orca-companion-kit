@@ -49,12 +49,13 @@ function readTerminal(root, id) {
 
 // Personal images for a theme live in assets/<theme id>/ (never in the repo) and surface as
 // --asset-<file name> custom properties, e.g. assets/my-theme/portrait.png -> var(--asset-portrait).
+// Audio files surface the same way (lullaby.ogg -> --asset-lullaby) for a companion to play (api.asset).
 function readAssets(root, id) {
   const dir = path.join(root, 'assets', id)
   if (!fs.existsSync(dir)) return ''
   const vars = fs
     .readdirSync(dir)
-    .filter((name) => /\.(png|jpe?g|webp|gif|svg)$/i.test(name))
+    .filter((name) => /\.(png|jpe?g|webp|gif|svg|ogg|mp3|m4a|wav)$/i.test(name))
     .map((name) => {
       const url = `file:///${path.join(dir, name).replace(/\\/g, '/')}`.replace(/"/g, '%22')
       return `--asset-${name.replace(/\.[^.]+$/, '').replace(/[^\w-]/g, '-')}: url("${url}");`
