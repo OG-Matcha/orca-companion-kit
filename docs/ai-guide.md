@@ -55,6 +55,7 @@ Test-Path "$HOME\.orca\themer"   # exists after the first launch through the kit
 - 招牌動作寫成 `acts` 裡的一個動作，設定 `signature`。再依個性加 1–3 個動作，例如愛睡的角色就提高 `doze` 的權重（`weight`）。
 - 台詞每種 2–5 句，短、口語，符合角色。同一個意思不要寫兩次。不要寫成客服腔或 AI 腔。
 - `names` 填角色的名字（中英文都填）。`words` 加 1–2 個跟角色有關的關鍵字反應。
+- 問使用者要不要開「要自己打開的行為」（捉迷藏、git 反應、被抓包、蹭蹭、一起讀、提燈，見 companion-api.md）；開了 `caught` 可以替角色寫一個自己的場景，開了 `readAlong` 可以在 SVG 裡畫一副眼鏡（`parts.glasses`）。想讓牠唱歌，請使用者自己放音檔到 `assets/<主題 id>/`，不要替他下載任何音檔。
 - 會說話的寵物記得：頻率限制由引擎處理，不要自己另外計時。
 
 ### 游標

@@ -66,6 +66,8 @@ agent 會先問你幾件事：參考圖、配色、角色個性、招牌動作�
 範例只是起點。以下都能自己寫，或直接請 agent 幫你做：
 
 - **寵物的個性。** 台詞、它認得的關鍵字（`words`）、聽到名字時的反應（`names`）、招牌動作和新的動作（`acts`）、要慶祝的紀念日（`milestones`）。內建的反應也能整個換掉。見 [companion-api.md](docs/companion-api.md)。
+- **自己打開的小遊戲和反應。** 設定裡寫一個 `true` 就有：點一下玩捉迷藏（躲到分頁列、側欄、狀態列後面探頭）、`git commit` 蓋章、`git push` 扔紙飛機、離開太久回來撞見它在偷玩、游標停著不動就蹭蹭、開著 Markdown 就戴眼鏡一起讀、傍晚點一盞燈。見 companion-api.md 的「要自己打開的行為」。
+- **聽到某個字就做某件事。** `words` 的 `react` 可以指到任何動作，包括放你自己的音檔：把音檔放進 `~/.orca/themer/assets/`，打「唱歌」它就唱。kit 不附任何音檔。
 - **全新的小功能。** 寵物之外，任何在 Orca 視窗裡跑的效果都可以寫成一個 touch：聚焦光暈、閒置畫面、狀態列裝飾、通知音效……放進 `~/.orca/themer/touches/`，主題列上它的 id 就會啟動，也能在 Ctrl+Alt+T 選單裡單獨開關。見 [touches.md](docs/touches.md)。
 - **可以疊加的樣式片段。** 小段 CSS（例如更圓的邊角）放進 `snippets/`，跟任何主題一起用。見 [themes.md](docs/themes.md#片段snippets)。
 - **修 Orca 的小毛病。** 不改安裝檔，在執行期替換 Orca 的程式片段。見 [fixes.md](docs/fixes.md#寫新的修正)。
@@ -109,4 +111,4 @@ npm run chime -- ~/.orca/themer/sounds/my-theme.wav 1046.5 1318.5
 npm install; .\install.ps1; npm run example   # then open Orca from its shortcut, Ctrl+Alt+T
 ```
 
-Open an agent in this folder and ask it to "make me an Orca theme and a desktop pet": `AGENTS.md` tells it how to interview you and what to generate. Drag the pet anywhere and drop it gently to give it a new home; the mouse wheel resizes it, and both are remembered. Beyond the pet, you can write your own touches (any effect that runs in an Orca window), stackable CSS snippets and runtime fixes. API reference: `docs/companion-api.md`, `docs/touches.md`. Read `docs/performance.md` before writing any CSS or touch: each rule there comes from a measured slowdown in Orca. Windows only for now (the launcher and shortcut handling use Windows paths and PowerShell).
+Open an agent in this folder and ask it to "make me an Orca theme and a desktop pet": `AGENTS.md` tells it how to interview you and what to generate. Drag the pet anywhere and drop it gently to give it a new home; the mouse wheel resizes it, and both are remembered. Opt-in behaviours take one `true` each in the pet's config: hide-and-seek behind the window's edges (click it, then find it), a stamp on `git commit` and a paper plane on `git push`, being caught in the act when you come back after a while, a nuzzle when the pointer rests on it, reading along on Markdown tabs, an evening lantern, and singing your own audio file (dropped into `~/.orca/themer/assets/`, never bundled) on a word. Beyond the pet, you can write your own touches (any effect that runs in an Orca window), stackable CSS snippets and runtime fixes. API reference: `docs/companion-api.md`, `docs/touches.md`. Read `docs/performance.md` before writing any CSS or touch: each rule there comes from a measured slowdown in Orca. Windows only for now (the launcher and shortcut handling use Windows paths and PowerShell).

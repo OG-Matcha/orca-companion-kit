@@ -46,6 +46,10 @@
     <g class="puff-eyes-sleep" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round">
       <path d="M50.5 62q3 2.6 6 0"/><path d="M63.5 62q3 2.6 6 0"/>
     </g>
+    <g class="puff-glasses" fill="rgb(214 232 255 / .25)" stroke="#ffd978" stroke-width="2" stroke-linecap="round">
+      <circle cx="53.5" cy="62" r="5.6"/><circle cx="66.5" cy="62" r="5.6"/>
+      <path d="M59.1 61.5q.9-1.4 1.8 0M47.9 61L44 59.5M72.1 61l3.9-1.5" fill="none"/>
+    </g>
     <g fill="#f2a7bd" opacity=".55"><ellipse cx="49" cy="70" rx="3.2" ry="1.8"/><ellipse cx="71" cy="70" rx="3.2" ry="1.8"/></g>
     <path d="M57.5 70.5q2.5 2 5 0" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="1.2" stroke-linecap="round"/>
   </svg>`
@@ -75,8 +79,23 @@
       happyEyes: '.puff-eyes-happy',
       sleepEyes: '.puff-eyes-sleep',
       ears: '.puff-ear-l, .puff-ear-r', // each ear pivots at its own data-origin
-      flutter: '.puff-tuft' // the idle "breathing" part
+      flutter: '.puff-tuft', // the idle "breathing" part
+      glasses: '.puff-glasses' // hidden until it reads along on a Markdown tab (readAlong below)
     },
+    // The opt-in extras (each is off unless listed). Click it once and it hides somewhere behind an edge;
+    // `git commit` / `git push` sent in the terminal get a stamp or a paper plane; come back after a long
+    // while and you may catch it juggling or nibbling; rest the pointer on it and it nuzzles; a Markdown
+    // tab gets the glasses; the lantern comes on in the evening.
+    hideAndSeek: true,
+    git: true,
+    caught: { scenes: ['juggle', 'nibble'] },
+    nuzzle: true,
+    readAlong: true,
+    lantern: true,
+    // Typing "唱歌" or "sing" in the terminal makes it sing. Put your own file (one you have the rights
+    // to) at ~/.orca/themer/assets/<theme id>/lullaby.ogg (or .mp3/.m4a/.wav) and it plays along;
+    // without a file it hums silently with notes. Nothing is bundled here.
+    sing: { asset: 'lullaby', start: 0, length: 20, volume: 0.35 },
     colors: { sparkle: '#fff6e8', heart: '#f6b3c8', note: '#e8e4ff', trail: '#fff6e8' },
     // Its signature move: a squashy double bounce.
     signature: 'boing',
@@ -102,6 +121,22 @@
           drizzle(api)
         }
       },
+      // A caught-in-the-act scene: nibbling a tuft of grass. A scene's run() returns a cleanup that hides
+      // the prop when it jumps; weight 0 keeps it out of the idle picks.
+      nibble: {
+        weight: 0,
+        run: ({ root, act, t, at, animateParts }) => {
+          const tuft = document.createElement('div')
+          tuft.textContent = '❀'
+          tuft.style.cssText = 'position:absolute;left:38px;top:44px;font:600 16px/1 system-ui;color:#9fd79a;text-shadow:0 0 6px #7cc777;pointer-events:none'
+          root.appendChild(tuft)
+          const chew = act(at([t(0, 0), t(1, 2, 3, 1.02, 0.98), t(-1, 1, -2), t(1, 2, 3, 1.02, 0.98), t(0, 0)], [0, 0.25, 0.5, 0.75, 1]), 1200)
+          animateParts('ears', [{ transform: 'rotate(0deg)' }, { transform: 'rotate(-6deg)' }, { transform: 'rotate(0deg)' }], { duration: 600, iterations: 2, composite: 'add' })
+          const done = () => (clearTimeout(stopAt), chew.cancel(), tuft.remove())
+          const stopAt = setTimeout(done, 6000) // when nothing catches it, the tuft goes on its own
+          return done
+        }
+      },
       // The built-in `chaseStar` fits a sheep less; take it out.
       chaseStar: null
     },
@@ -125,6 +160,10 @@
       welcome: ['你回來了！', '歡迎回來，我有乖乖等。'],
       name: ['咩？叫我嗎？', '我在！'],
       late: ['這麼晚了，早點休息好不好？', '比平常晚了呢，別太累。'],
+      found: ['被你找到了！', '咩，藏得不夠好。'],
+      notFound: ['哼哼，沒找到我吧。', '我躲得很好吧？'],
+      caught: ['我、我什麼都沒做。', '咦？你這麼快就回來了……', '剛剛那個……是祕密。'],
+      lantern: ['天黑了，我點一盞燈陪你。'],
       greeting: {
         morning: ['早安，今天也一起加油。'],
         noon: ['午安，記得吃飯。'],

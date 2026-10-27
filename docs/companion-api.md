@@ -38,9 +38,25 @@
 | 摸摸牠 | 游標在牠身上來回移動 |
 | 說話 | 對話框一個字一個字打出來。閒置台詞至少間隔 6 分鐘，任何台詞至少間隔 45 秒，一天最多 12 句 |
 | 記得你們的日子 | 一起過了幾天、第 7／30／100／200／365… 天會慶祝、依時段打招呼、比你平常晚很多還在用時會擔心你。全部只存在 localStorage |
-| 點一下 | 戳戳牠；在敲門時點牠，會切到那個分頁 |
+| 點一下 | 戳戳牠；在敲門時點牠，會切到那個分頁（用真的 pointerdown／mouseup 事件，因為 Orca 在 pointerdown 就切分頁，只送 `click()` 不會動） |
+| 唱歌 | 送出的那一行有「唱歌」「搖籃曲」、`sing`、`lullaby`，牠就唱：晃來晃去、冒音符。設了 `sing` 又放了你自己的音檔，就會放那段音樂（見下方「用自己的音檔唱歌」） |
 
 在系統設定「減少動態」時，牠不會出現，因為執行環境不會啟動任何 touch。
+
+### 要自己打開的行為
+
+下面這些預設關著，在設定裡寫 `true`（或一個選項物件）才會有。Puff 全都開了，可以拿來看效果。
+
+| 設定 | 牠會做什麼 | 選項 |
+| --- | --- | --- |
+| `hideAndSeek` | **捉迷藏。** 點牠一下就消失，躲到視窗裡某個邊緣後面：分頁列下緣、worktree 側欄右緣、檔案樹左緣、狀態列上緣、分割窗格的分隔線、通知卡片上緣，或視窗四邊。一開始只露頭頂，越久沒被找到越大膽：露出眼睛、探頭張望、飄出 ✦ 或「嘻」當提示。游標靠近就縮回去，離開一會兒再探出來。點到牠就是找到了（`lines.found`），45 秒沒找到牠就自己得意地出來（`lines.notFound`）。不會躲在游標底下或你正在打字的地方；有分頁在等你授權時會先收掉遊戲 | `{ giveUpAfter: 45000, click: true }`：多久放棄；`click: false` 表示點一下仍是戳戳，只能用 `api.hide()` |
+| `git` | **git 反應。** 終端機送出的那一行是 `git commit`，牠在旁邊蓋一個印章；`git push` 就折一架紙飛機扔向右上角。串在一起（`git add . && git commit && git push`）以最後一個為準；引號裡的字不算（`echo "git push"` 沒反應）；`--dry-run`、`--help` 不算 | 覆蓋 `reactions.gitCommit`、`reactions.gitPush` 換成自己的動作 |
+| `caught` | **被抓包。** 離開超過 `welcomeAfter` 再回來，有六成機率撞見牠在做自己的事（預設是玩星星雜耍），牠嚇一跳、把東西藏起來、臉紅、說一句 `lines.caught`，再安靜地接上歡迎。30 分鐘最多一次 | `{ chance: 0.6, cooldown: 1800000, scenes: ['juggle', 'myScene'] }`：`scenes` 是動作名稱，該動作的 `run` 要**回傳一個收拾函式**（把道具拿掉），見 Puff 的 `nibble` |
+| `nuzzle` | **蹭蹭。** 游標停在牠身上不動 2.5 秒，牠整個人靠過去來回蹭三下，冒大愛心。和來回摸摸是兩件事，90 秒冷卻 | `{ after: 2500, cooldown: 90000 }` |
+| `readAlong` | **一起讀。** 使用中的分頁是 `.md`／README 時，牠偶爾朝編輯器方向微傾、慢慢點頭讀起來；畫裡有 `parts.glasses`（平常隱藏）就會戴上眼鏡。8 分鐘最多一次，換分頁、被拖走、睡著或讀滿 45 秒就停 | `{ every: 480000, for: 45000, chance: 0.5 }` |
+| `lantern` | **提燈。** 每天 18 點後第一次在家就點亮一盞小燈籠，暖光緩緩呼吸，陪一整晚（`lines.lantern`）；以 05 點換日，早上吹熄。點燈日記在 bond 裡，重新載入只會安靜補回燈 | `{ from: 18, until: 5, svg: '<svg>…</svg>' }`：換時段，或換成自己畫的燈 |
+
+這些動作一樣只動 `transform`／`opacity`，位置只在開始時量一次，不在每一格讀版面。
 
 ## 設定
 
@@ -64,10 +80,12 @@
 | `names` | string[] | 牠的名字；出現在送出的那一行時，牠會開心地回應（`lines.name`） |
 | `lines` | object | 台詞，見下方。沒有台詞的寵物不會說話 |
 | `milestones` | number[] | 要慶祝的天數，預設 `[7, 30, 100, 200, 365, 500, 1000]` |
-| `emotes` | object | 新增或覆蓋頭上冒出的符號：`{ happy: ['♡', '#f6b3c8'] }` |
+| `emotes` | object | 新增或覆蓋頭上冒出的符號：`{ happy: ['♡', '#f6b3c8'] }`。內建：`happy`、`curious`、`bored`、`sleepy`、`worried`、`surprised`、`giggle`（躲著偷笑）、`smug`（沒被找到）、`blush`（被抓包） |
 | `idleEvery` | `[min, max]` ms | 閒置動作的間隔，預設 `[12000, 30000]` |
 | `sleepAfter` | ms | 多久沒操作就睡著，預設白天 90 秒、晚上 120 秒 |
 | `welcomeAfter` | ms | 離開多久回來才算「歡迎回來」，預設 10 分鐘 |
+| `sing` | `{ asset, start, length, volume }` | 唱歌時放的音檔：`asset` 是 `~/.orca/themer/assets/<主題 id>/` 裡的檔名（不含副檔名），`start` 從第幾秒開始、`length` 放幾秒（預設 20）、`volume` 0–1（預設 0.35）。沒設或找不到檔案就只冒音符 |
+| `hideAndSeek`、`git`、`caught`、`nuzzle`、`readAlong`、`lantern` | boolean \| object | 要自己打開的行為，見上方 |
 | `blink` | boolean | `false` 表示不眨眼 |
 | `eyeTravel` | `[x, y]` | 眼睛看向游標時最多移動多少，預設 `[2.2, 1.6]` |
 | `visitTabs` | boolean | `false` 表示不去敲等待授權的分頁 |
@@ -86,6 +104,7 @@
 | `sleepEyes` | 睡覺、打瞌睡時取代 `eyes` |
 | `ears` | 待機時輕擺，被嚇到、甩耳朵、環顧四周時會動。左右耳各自用 `data-origin` 設定支點 |
 | `flutter` | 待機時一直輕輕伸縮（翅膀、毛、尾巴） |
+| `glasses` | 平常隱藏，開了 `readAlong` 讀文件時戴上 |
 | 其他任何名稱 | 自己的動作可以用 `api.parts('tail')`、`api.animateParts('tail', keyframes, options)` 取用 |
 
 ### 台詞 `lines`
@@ -97,11 +116,14 @@ lines: {
   welcome: [...], name: [...],     // 歡迎回來、被叫名字
   late: [...],                     // 比你平常晚很多還在用時
   greeting: { morning, noon, afternoon, evening, night },  // 每天第一次見面
-  milestone: ['這是我們一起的第 {n} 天！']
+  milestone: ['這是我們一起的第 {n} 天！'],
+  found: [...], notFound: [...],   // 捉迷藏：被找到、沒被找到（hideAndSeek）
+  caught: [...],                   // 被抓包時的藉口（caught）
+  lantern: [...]                   // 點燈時（lantern）
 }
 ```
 
-台詞要短，一行就好（對話框不換行），寫得像這個角色會說的話。
+台詞要短，寫得像這個角色會說的話。對話框最寬 240px，太長會在框裡換行（兩行長度會盡量相近），框的大小先用整句量好、底邊固定在牠頭上，逐字打出時不會跳動。
 
 ### 動作 `acts`
 
@@ -118,11 +140,50 @@ acts: {
 
 `weight(c)` 拿到的 `c`：`{ mood, hour, night, near (游標在附近), working (有 agent 在工作) }`。
 
-內建動作：`wiggle`、`lookAround`、`stretch`、`earFlick`、`loop`、`doze`、`hum`、`chaseStar`、`peek`、`cheer`、`sigh`、`wander`。
+內建動作：`wiggle`、`lookAround`、`stretch`、`earFlick`、`loop`、`doze`、`hum`、`chaseStar`、`peek`、`cheer`、`sigh`、`wander`，另有閒置時不會挑到的 `sing`（唱歌）、`juggle`（玩星星雜耍，被抓包的預設場景）。
+
+**會回傳收拾函式的動作**可以當 `caught.scenes`：牠被抓包時先跑這個動作，跳起來的那一刻呼叫回傳的函式把道具拿掉。
+
+```js
+nibble: {
+  weight: 0,                               // 閒置時不挑它
+  run: ({ root, act, t }) => {
+    const tuft = document.createElement('div')
+    tuft.textContent = '❀'
+    tuft.style.cssText = 'position:absolute;left:38px;top:44px;pointer-events:none'
+    root.appendChild(tuft)
+    const chew = act([t(0, 0), t(1, 2, 3), t(0, 0)], 1200)
+    return () => (chew.cancel(), tuft.remove())  // 被抓包時收拾
+  }
+}
+```
+
+### 用關鍵字觸發任何動作
+
+`words` 的 `react` 可以是任何動作或反應的名稱，也可以是函式。所以「聽到某個字就做某件事」只要一行：
+
+```js
+words: [
+  { re: /跳舞|\bdance\b/i, react: 'loop' },                 // 內建動作
+  { re: /放煙火|fireworks/i, react: (api) => api.sparkle(20, 60) }
+]
+```
+
+### 用自己的音檔唱歌
+
+把你有權使用的音檔放到 `~/.orca/themer/assets/<主題 id>/lullaby.ogg`（`.mp3`、`.m4a`、`.wav` 也可以），它會變成 CSS 變數 `--asset-lullaby`；寵物設定寫：
+
+```js
+sing: { asset: 'lullaby', start: 13, length: 20, volume: 0.35 }
+```
+
+之後在終端機打「唱歌」或 `sing`，牠就邊晃邊放那 20 秒（淡入 0.8 秒、結尾淡出 1.5 秒）。視窗在背景、Orca 的通知音量是 0、或 `sounds: false` 時不會出聲；在終端機按任何鍵或點一下就立刻停。沒放檔案也能唱，只是無聲地冒音符。
+
+要在別的字或自己的動作裡放音檔，用 `api.playAudio('lullaby', { start, length, volume })`（`src` 也可以是 URL）；`api.stopAudio()` 停下。這個 kit 不附任何音檔，請用自己的。
 
 ### 反應 `reactions`
 
-內建反應：`happy`（被摸）、`twirl`、`signature`、`goodNews`、`thanks`、`sleepy`、`worried`、`curious`、`name`、`poke`（點一下），以及 `welcome`、`greet`、`milestone(n)`。用同樣的名稱就能覆蓋，例如 Puff 擔心時會下小雨：
+內建反應：`happy`（被摸）、`twirl`、`signature`、`goodNews`、`thanks`、`sleepy`、`worried`、`curious`、`name`、`poke`（點一下），以及 `welcome`、`greet`、`milestone(n)`；開了對應功能才會用到的 `gitCommit`、`gitPush`、`nuzzle`。用同樣的名稱就能覆蓋，例如 Puff 擔心時會下小雨：
 
 ```js
 reactions: { worried: (api) => { api.emote('worried'); api.acts.drizzle() } }
@@ -144,11 +205,16 @@ reactions: { worried: (api) => { api.emote('worried'); api.acts.drizzle() } }
 | `sparkle(n, radius?)`、`floatUp(glyph, color, opts?)` | 小特效 |
 | `chime(freqs, gain?, gap?)` | 合成鈴聲 |
 | `play(name)` | 觸發一個反應或動作 |
+| `openTab(el)` | 用真的指標事件切到某個 Orca 分頁（`el.click()` 切不過去） |
+| `asset(name)`、`playAudio(src, opts)`、`stopAudio()` | 讀 `--asset-<name>` 的網址；放、停你自己的音檔 |
+| `sing()` | 唱歌（有音檔就放） |
+| `hide(want?)`、`found()`、`giveUp()`、`hiding`、`seekSpots()` | 捉迷藏：現在躲起來（`want` 可指定 `tabs`、`sidebar`、`files`、`status`、`pane`、`divider`、`toast`、`window`）、找到、放棄；目前躲的狀態；畫面上可躲的位置 |
+| `caught(scene?)`、`nuzzle()`、`read(on?)`、`reading`、`lantern(on?)`、`lit` | 被抓包、蹭蹭、讀文件、點燈：不受機率與冷卻限制，方便預覽 |
 | `acts`、`reactions`、`mood`、`lines`、`bond`、`colors` | 目前的狀態 |
-| `spot`、`center()`、`size`、`mode`、`busy` | 位置與狀態（`mode`：`home`、`asleep`、`flying`、`following`、`visiting`） |
+| `spot`、`center()`、`size`、`mode`、`busy` | 位置與狀態（`mode`：`home`、`asleep`、`flying`、`following`、`visiting`、`hiding`） |
 | `root`、`svg`、`host` | 寵物的容器、SVG、所在的圖層（自己加的元素放進 `host`，並設 `pointer-events:none`） |
 
-除錯：在 DevTools Console 輸入 `__orcaThemer.companions.get('puff').acts.boing()`。
+除錯：在 DevTools Console 輸入 `__orcaThemer.companions.get('puff').acts.boing()`。捉迷藏、git、被抓包這些的純規則（挑位置、判斷 git 行、哪些分頁算文件、燈該不該亮）在 `__orcaThemer.companionRules`，不碰 DOM，`test/companion-rules.test.mjs` 直接跑它們。
 
 ## 畫 SVG 的建議
 

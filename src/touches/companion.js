@@ -3,8 +3,10 @@
 // and gets a pet that can be dragged and thrown, resized with the wheel, follows you on double-click
 // (right-click stops it), looks at your pointer, sways while you type, has moods, idles without repeating
 // itself, startles, welcomes you back, watches Orca's agent tabs, reacts to the line you send, likes
-// being petted, says a short line now and then, and remembers the days you spent together.
-// Full reference: docs/companion-api.md.
+// being petted, says a short line now and then, and remembers the days you spent together. Opt-in extras:
+// hide-and-seek behind the window's edges, git commit/push reactions, being caught in the act when you
+// come back, a nuzzle when the pointer rests on it, reading along on Markdown tabs, an evening lantern,
+// and singing your own audio file on a word. Full reference: docs/companion-api.md.
 //
 // Rules this file keeps (and character files should too):
 // - Motion is WAAPI on transform/opacity only; one rAF loop runs only while thrown or following.
@@ -49,6 +51,8 @@
     { re: /(沒有?|不是|沒|no|not an?)\s*(bug|錯誤?|問題|error|壞)|完成|搞定|成功|好耶|太棒|超棒|讚|\b(done|yay|nice|lgtm|fixed|works)\b/i, react: 'goodNews' },
     { re: /謝謝|感謝|\b(thanks?|thx|ty)\b/i, react: 'thanks' },
     { re: /晚安|好睏|好累|想睡|\b(good ?night|sleepy|tired)\b/i, react: 'sleepy' },
+    // Before `curious`, so "可以唱歌嗎？" sings instead of tilting its head.
+    { re: /唱歌|唱首歌|搖籃曲|\b(sing|lullaby)\b/i, react: 'sing' },
     { re: /bug|錯誤|壞了|失敗|卡住|\b(error|fail(ed)?|broken|crash)/i, react: 'worried' },
     { re: /[?？]\s*$|為什麼|怎麼|\b(why|how)\b/i, react: 'curious' }
   ]
@@ -81,6 +85,109 @@
   const wait = (ms) => new Promise((r) => setTimeout(r, ms))
 
   T.companions ??= new Map()
+
+  // Opens an Orca tab the way a real click does. Orca switches tabs on pointerdown (the tab strip is
+  // sortable), so a bare el.click() leaves you where you were.
+  function openTab(tab) {
+    if (!tab?.isConnected) return false
+    const r = tab.getBoundingClientRect()
+    const o = { bubbles: true, cancelable: true, composed: true, view: window, clientX: r.left + r.width / 2, clientY: r.top + r.height / 2, button: 0, buttons: 1, pointerId: 1, pointerType: 'mouse', isPrimary: true }
+    tab.dispatchEvent(new PointerEvent('pointerdown', o))
+    tab.dispatchEvent(new MouseEvent('mousedown', o))
+    tab.dispatchEvent(new PointerEvent('pointerup', { ...o, buttons: 0 }))
+    tab.dispatchEvent(new MouseEvent('mouseup', { ...o, buttons: 0 }))
+    tab.click()
+    return true
+  }
+
+  // ---------- pure rules (no DOM), exposed as T.companionRules so tests can walk them ----------
+  // Hide-and-seek: a spot is a point on the edge of something on screen plus `dir`, the way the pet peeks
+  // out; the thing hiding it lies on the other side of that line. Rects are plain {left, top, right,
+  // bottom} measured once when it hides. `rand` is injectable so tests are repeatable.
+  const SEEK = (() => {
+    const OUT = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }
+    const ROT = { up: 0, right: 90, down: 180, left: -90 }
+    const WEIGHT = { toast: 3, tabs: 2, status: 2, sidebar: 2, files: 2, divider: 2, pane: 2, window: 1 }
+    const ok = (r) => r && r.right - r.left > 0 && r.bottom - r.top > 0
+    // A point along [a, b], kept `m` px away from both ends; null when the stretch is too short.
+    const along = (a, b, m, rand) => (b - a < m * 2 + 24 ? null : a + m + rand() * (b - a - m * 2))
+    function spots(r, view, rand = Math.random) {
+      const out = []
+      const add = (name, x, y, dir) => x != null && y != null && out.push({ name, x: Math.round(x), y: Math.round(y), dir })
+      const H = (name, rect, y, dir, m = 40) => ok(rect) && add(name, along(rect.left, rect.right, m, rand), y, dir)
+      const V = (name, rect, x, dir, m = 50) => ok(rect) && add(name, x, along(rect.top, rect.bottom, m, rand), dir)
+      if (ok(r.tabs)) H('tabs', r.tabs, r.tabs.bottom, 'down')
+      if (ok(r.sidebar) && r.sidebar.right - r.sidebar.left > 140) V('sidebar', r.sidebar, r.sidebar.right, 'right', 70)
+      if (ok(r.files) && r.files.right - r.files.left > 120) V('files', r.files, r.files.left, 'left', 70)
+      if (ok(r.status)) H('status', r.status, r.status.top, 'up', 60)
+      for (const p of (r.panes || []).filter(ok).slice(0, 4)) {
+        if (p.right - p.left < 160 || p.bottom - p.top < 120) continue
+        if (rand() < 0.5) add('pane', p.right - 40, p.bottom, 'up')
+        else add('pane', p.left + 40, p.top, 'down')
+      }
+      for (const d of (r.dividers || []).filter((d) => ok(d.rect)).slice(0, 4)) {
+        const { rect, vertical } = d
+        if (vertical) V('divider', rect, (rect.left + rect.right) / 2, rand() < 0.5 ? 'left' : 'right')
+        else H('divider', rect, (rect.top + rect.bottom) / 2, rand() < 0.5 ? 'up' : 'down')
+      }
+      for (const t of (r.toasts || []).filter(ok).slice(0, 2)) H('toast', { left: t.left, top: t.top, bottom: t.bottom, right: Math.min(t.right, t.left + 120) }, t.top, 'up', 30) // not {...t}: a DOMRect's fields are getters
+      const all = { left: 0, top: 0, right: view.w, bottom: view.h }
+      H('window', all, view.h, 'up', 80)
+      H('window', all, 0, 'down', 80)
+      V('window', all, 0, 'right', 80)
+      V('window', all, view.w, 'left', 80)
+      return out
+    }
+    const near = (s, p, d) => p && Math.hypot(s.x - p.x, s.y - p.y) < d
+    const inside = (s, r, pad) => s.x > r.left - pad && s.x < r.right + pad && s.y > r.top - pad && s.y < r.bottom + pad
+    // What shows of the pet (about box × box/2 outward of the line) has to stay on screen.
+    const fits = (s, view, box) => {
+      const [nx, ny] = OUT[s.dir]
+      const ox = s.x + nx * box * 0.6
+      const oy = s.y + ny * box * 0.6
+      const half = box / 2
+      return s.x >= 0 && s.x <= view.w && s.y >= 0 && s.y <= view.h && ox >= 0 && ox <= view.w && oy >= 0 && oy <= view.h && (ny ? s.x >= half && s.x <= view.w - half : s.y >= half && s.y <= view.h - half)
+    }
+    // Picks one spot: not under the pointer, not on what you are typing into, not right where it was.
+    // `want` (a spot name) narrows the pick when such a spot exists. Rules relax step by step, so there is
+    // always an answer while the window has any size at all.
+    function pick(cands, { view, box = 64, pointer = null, from = null, avoid = [], want = null, rand = Math.random } = {}) {
+      const onScreen = cands.filter((s) => OUT[s.dir] && fits(s, view, box))
+      const safe = onScreen.filter((s) => !near(s, pointer, 160) && !avoid.some((r) => inside(s, r, 90)))
+      const steps = [safe.filter((s) => !near(s, from, 220)), safe, onScreen.filter((s) => !near(s, pointer, 160)), onScreen]
+      const only = want && onScreen.some((s) => s.name === want)
+      for (const pool of steps) {
+        const list = only ? pool.filter((s) => s.name === want) : pool
+        if (!list.length) continue
+        let r = rand() * list.reduce((a, s) => a + (WEIGHT[s.name] || 1), 0)
+        for (const s of list) if ((r -= WEIGHT[s.name] || 1) <= 0) return s
+        return list[list.length - 1]
+      }
+      return null
+    }
+    return { OUT, ROT, spots, pick }
+  })()
+  // A sent git line: the last `git commit` / `git push` in a chain counts ("git add . && git commit -m x").
+  // Quoted strings are dropped first, so `git commit -m "git push"` is a commit and `echo "git push"` is
+  // nothing. Only the typed line is read, never terminal output; a dry run or help does not count.
+  const GIT_RE = /(?:^\s*|[;&|]+\s*)git\s+(?:(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?)\s+)*(commit|push)\b/g
+  function gitMoment(line) {
+    const bare = String(line ?? '').replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""')
+    if (/--dry-run\b|(?:^|\s)(?:-h|--help)(?:\s|$)/.test(bare)) return null
+    let kind = null
+    for (const m of bare.matchAll(GIT_RE)) kind = m[1]
+    return kind
+  }
+  // Tabs worth reading along with: Markdown files and READMEs.
+  const isReadable = (title) => /\.(md|markdown|mdx)$/i.test(String(title ?? '').trim()) || /^readme(\.|$)/i.test(String(title ?? '').trim())
+  // The lantern follows the evening (`from` o'clock until the `until` o'clock day roll): light it once per
+  // day, keep it lit after a reload, put it out in the morning. `lit` is the day key it was last lit on.
+  function lanternPhase({ hour, day, lit, from = 18, until = 5 }) {
+    const evening = hour >= from || hour < until
+    if (!evening) return 'out'
+    return lit === day ? 'keep' : 'light'
+  }
+  T.companionRules = { seek: SEEK, gitMoment, isReadable, lanternPhase, defaultWords: DEFAULT_WORDS, openTab }
 
   T.registerCompanion = function registerCompanion(cfg) {
     if (!cfg?.id || typeof cfg.svg !== 'string') throw new Error('registerCompanion needs { id, svg }')
@@ -212,7 +319,15 @@
     let busy = null // the action playing now; idle picks wait for it
     let drag = null
     let roaming = false // out for a little stroll: don't snap it home
-    const onResize = () => mode === 'home' && !drag && !roaming && place(homeSpot())
+    const free = () => !stopped && mode === 'home' && !drag && !roaming && !document.hidden
+    const onResize = (e) => {
+      if (e?.type === 'resize' && seek?.spot && mode === 'hiding') {
+        clearTimeout(seek.resized)
+        seek.resized = seekLater(reseek, 150) // once the resize settles: the rects moved
+        return
+      }
+      if (mode === 'home' && !drag && !roaming) place(homeSpot())
+    }
     addEventListener('resize', onResize)
     const reposition = setInterval(() => {
       onResize() // the sidebar can be dragged wider or collapsed
@@ -220,10 +335,10 @@
     }, 5000)
 
     // ---------- small effects ----------
-    const floatUp = (glyph, color, { x = center().x, y = spot.y + BOX * 0.1, rise = 30, ms = 1100 } = {}) => {
+    const floatUp = (glyph, color, { x = center().x, y = spot.y + BOX * 0.1, rise = 30, ms = 1100, px = 0 } = {}) => {
       const el = document.createElement('div')
       el.textContent = glyph
-      el.style.cssText = `position:absolute;left:${x}px;top:${y}px;font:600 ${Math.round(12 * Math.max(1, size * 0.8))}px/1 system-ui;color:${color};text-shadow:0 0 6px ${color};pointer-events:none`
+      el.style.cssText = `position:absolute;left:${x}px;top:${y}px;font:600 ${px || Math.round(12 * Math.max(1, size * 0.8))}px/1 system-ui;color:${color};text-shadow:0 0 6px ${color};pointer-events:none;white-space:nowrap`
       host.appendChild(el)
       const dx = (Math.random() - 0.5) * 24
       el.animate(
@@ -274,6 +389,9 @@
       sleepy: ['z', C.calm],
       worried: ['!?', C.alert],
       surprised: ['!', C.alert],
+      giggle: ['嘻', C.heart], // a hint from its hiding place, and when found
+      smug: ['哼哼', C.dim], // you never found it
+      blush: ['///', C.heart], // caught in the act
       ...cfg.emotes
     }
     const emote = (name) => {
@@ -296,7 +414,7 @@
     // Few and far between: idle lines at least 6 minutes apart, any line at least 45 s apart, at most 12 a
     // day. Milestones, greetings and late-night worry skip the spacing (they are rare by nature).
     // A character with no `lines` never speaks.
-    const L = { idle: [], night: [], done: [], failed: [], welcome: [], name: [], late: [], milestone: [], ...cfg.lines }
+    const L = { idle: [], night: [], done: [], failed: [], welcome: [], name: [], late: [], milestone: [], found: [], notFound: [], caught: [], lantern: [], ...cfg.lines }
     const pick = (list) => (Array.isArray(list) && list.length ? list[(Math.random() * list.length) | 0] : null)
     const today = () => new Date().toLocaleDateString('sv') // YYYY-MM-DD, local time
     const BOND_KEY = `orca-companion:${id}:bond`
@@ -329,21 +447,32 @@
       const el = document.createElement('div')
       bubble = el
       el.setAttribute('role', 'status')
-      const cx = Math.min(Math.max(center().x, 120), innerWidth - 120)
-      const top = Math.max(8, center().y - HALF * size - 40)
+      // Long lines wrap inside the box (nowrap let them spill past max-width). The box is sized for the
+      // whole line up front (the rest of it sits there invisible), its bottom just over the pet's head, so
+      // typing it out never makes it jump or cover the pet. Measured once per line, not per character.
       el.style.cssText =
-        `position:absolute;left:${cx}px;top:${top}px;transform:translateX(-50%);max-width:240px;padding:6px 12px;border-radius:12px;` +
+        'position:absolute;left:0;top:0;transform:translateX(-50%);width:max-content;max-width:240px;padding:6px 12px;border-radius:12px;' +
         'background:color-mix(in srgb,var(--popover,#1b1b24) 94%,transparent);color:var(--popover-foreground,#eee);border:1px solid var(--border,#444);' +
-        'box-shadow:0 10px 24px -10px rgb(0 0 0 / .7);font:13px/1.55 var(--app-font-family,system-ui);letter-spacing:.02em;white-space:nowrap;pointer-events:none;' +
+        'box-shadow:0 10px 24px -10px rgb(0 0 0 / .7);font:13px/1.55 var(--app-font-family,system-ui);letter-spacing:.02em;' +
+        'white-space:normal;overflow-wrap:anywhere;text-wrap:balance;pointer-events:none;' +
         (cfg.bubbleStyle ?? '')
+      const shown = document.createTextNode('')
+      const rest = document.createElement('span')
+      rest.style.visibility = 'hidden'
+      rest.textContent = String(text)
+      el.append(shown, rest)
       host.appendChild(el)
+      const { width: w, height: h } = el.getBoundingClientRect()
+      el.style.left = `${Math.min(Math.max(center().x, w / 2 + 8), innerWidth - w / 2 - 8)}px`
+      el.style.top = `${Math.max(8, center().y - HALF * size - 6 - h)}px`
       el.animate([{ opacity: 0, transform: 'translate(-50%, 6px) scale(.96)' }, { opacity: 1, transform: 'translate(-50%, 0) scale(1)' }], { duration: 240, easing: 'cubic-bezier(.2,.8,.3,1)' })
       // Typed out a character at a time, the way someone talks.
       const chars = [...String(text)]
       let i = 0
       const type = () => {
         if (bubble !== el) return
-        el.textContent = chars.slice(0, ++i).join('')
+        shown.data = chars.slice(0, ++i).join('')
+        rest.textContent = chars.slice(i).join('')
         if (i < chars.length) bubbleTimer = setTimeout(type, 55)
         else bubbleTimer = setTimeout(hush, 2400 + chars.length * 110)
       }
@@ -531,6 +660,33 @@
           setTimeout(() => !stopped && emote('bored'), 900)
         }
       },
+      // Sings: your own audio file when `sing` names one (see playAudio), else a silent hum with notes.
+      // Not picked when idle; a word ("唱歌", "sing") or play('sing') asks for it.
+      sing: { weight: 0, run: () => sing() },
+      // Juggles three stars until the returned cleanup is called (the default scene for being caught in
+      // the act), or for six seconds when nothing calls it.
+      juggle: {
+        weight: 0,
+        run: () => {
+          const stars = []
+          for (let i = 0; i < 3; i++) {
+            const star = document.createElement('div')
+            star.textContent = '✦'
+            star.style.cssText = `position:absolute;left:${HALF - 6}px;top:${BOX * 0.06}px;font:600 ${Math.round(BOX * 0.33)}px/1 system-ui;color:${C.sparkle};text-shadow:0 0 10px ${C.alert};pointer-events:none`
+            bob.appendChild(star)
+            stars.push(star)
+            const arc = Array.from({ length: 13 }, (_, k) => {
+              const a = (k / 12) * Math.PI * 2
+              return { transform: `translate(${(Math.cos(a) * BOX * 0.37).toFixed(1)}px,${(-Math.abs(Math.sin(a)) * BOX * 0.47 + BOX * 0.1).toFixed(1)}px) rotate(${k * 30}deg)` }
+            })
+            star.animate(arc, { duration: 1100, iterations: Infinity, delay: -i * 366 })
+          }
+          const hop = bob.animate([t(0, 0), t(0, -5), t(0, 0)], { duration: 400, iterations: Infinity, composite: 'add' })
+          const done = () => (clearTimeout(stopAt), hop.cancel(), stars.forEach((s) => s.remove()))
+          const stopAt = setTimeout(done, 6000)
+          return done
+        }
+      },
       // Wanders off a little way, looks around there, and drifts back home.
       wander: {
         weight: (c) => 1.5 + c.mood.bored * 3 + c.mood.curious * 3,
@@ -706,6 +862,7 @@
       }
       lastPointer = p
       pointer = p
+      if (seek?.spot && mode === 'hiding') seekNear(p)
       if (!gazeQueued) gazeQueued = requestAnimationFrame(gaze)
     }
     addEventListener('pointermove', onPointer, { capture: true, passive: true })
@@ -738,6 +895,7 @@
     let lastWord = -Infinity // performance.now() starts near 0 on a fresh window
     let erased = []
     let lastPuzzled = -Infinity
+    let lastGit = -Infinity
     const onTypedChar = (e) => {
       if (!isTerminal(e.target) || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.key === 'Process') return
       if (e.key === 'Enter') {
@@ -745,7 +903,14 @@
         line = ''
         noteSent()
         const now = performance.now()
-        if (mode !== 'home' || drag || now - lastWord < 8000) return
+        if (mode !== 'home' || drag) return
+        // A git commit or push (opt-in) comes first and has its own, shorter spacing.
+        const git = cfg.git ? gitMoment(sent) : null
+        if (git && now - lastGit > 5000) {
+          lastGit = lastWord = now
+          return play(git === 'push' ? 'gitPush' : 'gitCommit')
+        }
+        if (now - lastWord < 8000) return
         const hit = words.find((w) => w.re.test(sent))
         if (!hit) return
         lastWord = now
@@ -835,14 +1000,25 @@
         vigil = null
       }
     }
+    // Something failed: it visibly sags for a couple of seconds (head down, body squashed, ears flat, the
+    // fluttering part folded, glow out), then slowly picks itself back up. Reduced motion keeps only the dim.
     const droop = () => {
       if (mode !== 'home') return
-      bob.animate([{ transform: 'translateY(0)' }, { transform: 'translateY(9px) rotate(-6deg)', offset: 0.4 }, { transform: 'translateY(0)' }], { duration: 1800, easing: 'ease-in-out', composite: 'add' })
-      if (glowColor) glow.animate([{ opacity: baseGlow }, { opacity: 0.06, offset: 0.4 }, { opacity: baseGlow }], { duration: 1800 })
+      const D = 2600
+      const sag = (from, to) => [from, { ...to, offset: 0.18 }, { ...to, offset: 0.72 }, from]
+      if (!T.reducedMotion?.()) {
+        bob.animate(sag({ transform: 'translateY(0)' }, { transform: `translateY(${BOX * 0.23}px) rotate(-11deg) scale(.94,.86)` }), { duration: D, easing: 'cubic-bezier(.3,.7,.3,1)', composite: 'add' })
+        animateParts('ears', sag({ transform: 'scaleY(1)' }, { transform: 'scaleY(.62)' }), { duration: D, easing: 'ease-out', composite: 'add' })
+        animateParts('flutter', sag({ transform: 'scaleX(1)' }, { transform: 'scaleX(.66)' }), { duration: D, easing: 'ease-out', composite: 'add' })
+      }
+      bob.animate(sag({ opacity: 1 }, { opacity: 0.55 }), { duration: D, easing: 'ease-out' })
+      if (glowColor) glow.animate(sag({ opacity: baseGlow }, { opacity: 0 }), { duration: D, easing: 'ease-out' })
+      later(300, () => emote('worried'))
     }
     let visitingTab = null
     let knock = null
     const visit = async (tab) => {
+      if (tab && mode === 'hiding') endSeek() // a tab waiting for you beats the game
       if (tab && mode === 'home' && !busy && !drag) {
         mode = 'visiting'
         visitingTab = tab
@@ -915,7 +1091,8 @@
       if (away()) return onLeave()
       const gone = awaySince ? Date.now() - awaySince : 0
       awaySince = 0
-      if (gone > (cfg.welcomeAfter ?? 10 * 60000)) welcomeTimer = setTimeout(() => !stopped && reactions.welcome?.(), 300)
+      // Sometimes (opt-in) you catch it doing something of its own; otherwise the plain welcome.
+      if (gone > (cfg.welcomeAfter ?? 10 * 60000)) welcomeTimer = setTimeout(() => !stopped && !caught() && reactions.welcome?.(api), 300)
     }
     reactions.welcome ??= welcome
     addEventListener('blur', onLeave)
@@ -942,7 +1119,9 @@
       }
       z()
     }
+    let lastActive = Date.now()
     const wake = () => {
+      lastActive = Date.now()
       clearTimeout(sleepTimer)
       sleepTimer = setTimeout(sleep, sleepAfter())
       if (mode !== 'asleep') return
@@ -961,6 +1140,7 @@
     // ---------- size: the wheel over it (0.5x to 2.5x, remembered) ----------
     const onWheel = (e) => {
       e.preventDefault()
+      if (seek) return // tucked behind an edge: resizing would push it out of its hiding place
       size = Math.min(2.5, Math.max(0.5, size * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
       if (Math.abs(size - 1) < 0.04) size = 1
       place(clamp(spot))
@@ -1134,15 +1314,17 @@
       sound('follow', 0.05)
     }
 
-    // ---------- clicks: one = a poke (or go answer the waiting tab), two = follow ----------
+    // ---------- clicks: one = a poke (or go answer the waiting tab; or hide, when hide-and-seek is on), two = follow ----------
     let clickTimer = 0
     const singleClick = () => {
+      if (mode === 'hiding') return seek && comeHome(true) // found it
       if (mode === 'visiting') {
-        visitingTab?.click()
+        openTab(visitingTab)
         return leaveVisit()
       }
       if (mode === 'asleep') return wake()
       if (mode !== 'home' || busy) return
+      if (SEEK_CFG && SEEK_CFG.click !== false) return hide()
       reactions.poke()
     }
     const onClick = (e) => {
@@ -1158,6 +1340,743 @@
     }
     home.addEventListener('click', onClick)
     home.addEventListener('dblclick', onDblClick)
+
+    // A small prop (a stamp, a plane, a lantern) dropped into `parent`; plain DOM moved with WAAPI.
+    const prop = (parent, html, css) => {
+      const el = document.createElement('div')
+      el.innerHTML = html
+      el.style.cssText = `position:absolute;pointer-events:none;${css}`
+      parent.appendChild(el)
+      return el
+    }
+    const sideOf = () => (center().x > innerWidth - 150 ? -1 : 1) // the roomier side
+
+    // ---------- audio: plays a file of your own, never one bundled here ----------
+    // ~/.orca/themer/assets/<theme id>/<name>.(ogg|mp3|m4a|wav) surfaces as --asset-<name>; asset('name')
+    // gives its URL. Nothing plays while the window is hidden, with `sounds: false`, or when Orca's
+    // notification volume is 0; any key or click in the terminal stops it at once.
+    const asset = (name) => {
+      const v = getComputedStyle(document.documentElement).getPropertyValue(`--asset-${name}`).trim()
+      return v.match(/^url\(\s*(["']?)(.*)\1\s*\)$/)?.[2] ?? ''
+    }
+    const soundMuted = async () => {
+      try {
+        return (await window.api?.settings?.get?.())?.notifications?.customSoundVolume === 0
+      } catch {
+        return false
+      }
+    }
+    let playing = null
+    const stopAudio = (fadeMs = 0) => {
+      if (!playing) return
+      const s = playing
+      playing = null
+      clearInterval(s.fade)
+      clearTimeout(s.end)
+      if (song) stopSing()
+      if (!fadeMs) return s.audio.pause()
+      const from = s.audio.volume
+      const t0 = performance.now()
+      const fade = setInterval(() => {
+        const k = Math.min(1, (performance.now() - t0) / fadeMs)
+        s.audio.volume = from * (1 - k)
+        if (k >= 1) clearInterval(fade), s.audio.pause()
+      }, 40)
+    }
+    // `src`: an asset name or a URL. Resolves true once it is playing; false when it cannot (no file, muted).
+    const playAudio = async (src, { start = 0, length = 0, volume = 0.35, fadeIn = 800, fadeOut = 1500 } = {}) => {
+      if (!S || !src || playing || stopped || document.hidden) return false
+      const url = /^[a-z][a-z0-9+.-]*:/i.test(src) ? src : asset(src)
+      if (!url || (await soundMuted())) return false
+      if (playing || stopped || document.hidden) return false
+      const audio = new Audio(url)
+      audio.volume = 0
+      const s = { audio, fade: 0, end: 0 }
+      playing = s
+      try {
+        await new Promise((ok, fail) => {
+          audio.addEventListener('loadedmetadata', ok, { once: true })
+          audio.addEventListener('error', fail, { once: true })
+        })
+        audio.currentTime = Math.max(0, Number(start) || 0)
+        await audio.play()
+      } catch {
+        if (playing === s) playing = null
+        return false
+      }
+      if (playing !== s) return audio.pause(), false
+      const peak = Math.min(1, Math.max(0, Number(volume) || 0))
+      const t0 = performance.now()
+      s.fade = setInterval(() => {
+        const k = Math.min(1, (performance.now() - t0) / Math.max(1, fadeIn))
+        audio.volume = peak * k
+        if (k >= 1) clearInterval(s.fade)
+      }, 40)
+      const ms = (length > 0 ? length : audio.duration - audio.currentTime) * 1000
+      if (Number.isFinite(ms)) s.end = setTimeout(() => playing === s && stopAudio(fadeOut), Math.max(0, ms - fadeOut))
+      audio.addEventListener('ended', () => playing === s && stopAudio(), { once: true })
+      return true
+    }
+    const hushAudio = (e) => playing && (e.type === 'visibilitychange' ? document.hidden : isTerminal(e.target) || e.target?.closest?.('.xterm')) && stopAudio()
+    addEventListener('keydown', hushAudio, true)
+    addEventListener('pointerdown', hushAudio, true)
+    document.addEventListener('visibilitychange', hushAudio)
+
+    // Sings: a slow wide sway with notes drifting up. With `sing: { asset, start, length, volume }` and that
+    // file in place, the file plays along (fades in and out); without one it is a silent four-second hum.
+    const SING = typeof cfg.sing === 'string' ? { asset: cfg.sing } : cfg.sing && typeof cfg.sing === 'object' ? cfg.sing : null
+    let song = null
+    const stopSing = () => {
+      if (!song) return
+      const s = song
+      song = null
+      clearTimeout(s.notes)
+      clearTimeout(s.end)
+      s.sway?.cancel()
+      if (busy === s.hold) busy = null
+      stopAudio(600)
+    }
+    const sing = async () => {
+      if (song || mode !== 'home' || drag || stopped) return false
+      const s = (song = { sway: null, notes: 0, end: 0, hold: null })
+      s.hold = { cancel: stopSing, playState: 'running' }
+      busy?.cancel()
+      busy = s.hold
+      const played = SING?.asset ? await playAudio(SING.asset, { start: SING.start ?? 0, length: SING.length ?? 20, volume: SING.volume ?? 0.35 }) : false
+      if (song !== s) return false
+      if (mode !== 'home') return stopSing(), false
+      const ms = played ? (SING.length ?? 20) * 1000 : 4000
+      s.sway = bob.animate([t(0, 0), t(-3, -1, -7), t(0, -2), t(3, -1, 7), t(0, 0)], { duration: 3800, iterations: Infinity, easing: 'ease-in-out', composite: 'add' })
+      setFace('happy', ms)
+      const notes = (i = 0) => {
+        if (song !== s) return
+        floatUp(['♪', '♫', '♩'][i % 3], i % 4 === 3 ? C.heart : C.note, { x: center().x + (i % 2 ? 14 : -4) * size, y: center().y - BOX * 0.47 * size, rise: 38, ms: 2000 })
+        s.notes = setTimeout(() => notes(i + 1), 700 + Math.random() * 500)
+      }
+      notes()
+      s.end = setTimeout(() => song === s && stopSing(), ms)
+      feel('happy', 0.2)
+      return true
+    }
+
+    // ---------- hide-and-seek (opt-in): one click and it tucks itself behind an edge somewhere ----------
+    // Behind the tab bar, a pane divider, the file tree, the status bar, a toast, or the window's own edge,
+    // so only the top of its head shows past it, later its eyes. Now and then it leans out to look around
+    // and ducks back; the pointer coming close makes it duck fast. The longer you don't find it the bolder
+    // it gets, with a ✦ or a giggle drifting out as a hint. Click it to find it; after `giveUpAfter` it
+    // gives up, pops out a little smug, and flies home.
+    // How it is drawn: `home` sits with its center on the edge, turned so its "up" points out of the
+    // hiding place, and is clipped (once per hide) to the outward half; `bob` slides along that "up"
+    // (transform only) to show more or less of the drawing. How far the ears and eyes reach is read from
+    // the pet's own SVG once per hide, so any drawing lines up with the edge. Rects are measured when it
+    // hides and after a resize; the pointer check reuses pointermove, at most every 50 ms, against cached numbers.
+    const SEEK_CFG = cfg.hideAndSeek ? (typeof cfg.hideAndSeek === 'object' ? cfg.hideAndSeek : {}) : null
+    const SEEK_GIVE_UP = SEEK_CFG?.giveUpAfter ?? 45000
+    const CLIP = `polygon(${-2 * BOX}px ${-2 * BOX}px, ${3 * BOX}px ${-2 * BOX}px, ${3 * BOX}px ${HALF}px, ${-2 * BOX}px ${HALF}px)`
+    let seek = null
+    const seekLater = (fn, ms) => {
+      const s = seek
+      const id = setTimeout(() => {
+        s?.timers.delete(id)
+        if (seek === s && !stopped) fn()
+      }, ms)
+      s?.timers.add(id)
+      return id
+    }
+    const visibleRect = (el) => {
+      const r = el?.getBoundingClientRect()
+      return r && r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight ? r : null
+    }
+    // The largest ancestor that keeps the same edge (`key`) as `el`, within a size limit: the panel a row
+    // or strip belongs to.
+    const panelOf = (el, key, ok) => {
+      let best = visibleRect(el)
+      for (let p = el?.parentElement; best && p && p !== document.body; p = p.parentElement) {
+        const r = visibleRect(p)
+        if (!r || Math.abs(r[key] - best[key]) > 2 || !ok(r)) break
+        best = r
+      }
+      return best
+    }
+    // Live rects, read only here (when it hides, and after a resize). Every lookup is optional: a missing
+    // hook just means fewer places, and the window's own edges are always there.
+    const measureSeek = () => {
+      const tab = [...document.querySelectorAll('[data-testid="sortable-tab"]')].find(visibleRect)
+      let tabs = null
+      for (let p = tab?.parentElement; p && p !== document.body; p = p.parentElement) {
+        const r = visibleRect(p)
+        if (r && r.width >= 240 && r.height < 64) tabs = r
+        if (r && r.height >= 64) break
+      }
+      tabs ??= visibleRect(document.getElementById('titlebar-tabs')) ?? visibleRect(document.querySelector('.titlebar'))
+      const sidebar = visibleRect(document.querySelector('.bg-worktree-sidebar[data-os-file-drop-owner]'))
+      const fileRow = document.querySelector('[data-file-explorer-row]') ?? document.querySelector('.right-sidebar-activity-strip')
+      const files = fileRow && panelOf(fileRow, 'left', (r) => r.width < innerWidth * 0.6)
+      let status = null
+      for (let p = document.querySelector('.status-bar-usage-cluster'); p && p !== document.body; p = p.parentElement) {
+        const r = visibleRect(p)
+        if (r && r.height < 48 && r.width >= innerWidth * 0.5 && r.bottom >= innerHeight - 4) {
+          status = r
+          break
+        }
+      }
+      const paneEls = [...document.querySelectorAll('.pane[data-pane-id]')]
+      const panes = (paneEls.length ? paneEls : [...document.querySelectorAll('.xterm')]).map(visibleRect).filter(Boolean)
+      const dividers = [...document.querySelectorAll('.pane-divider')].map((el) => ({ rect: visibleRect(el), vertical: el.classList.contains('is-vertical') })).filter((d) => d.rect)
+      const toasts = [...document.querySelectorAll('[data-sonner-toast]')].map(visibleRect).filter(Boolean)
+      // Not over what you are typing into: the terminal's input sits at its cursor.
+      const avoid = []
+      const typing = document.activeElement
+      if (typing instanceof HTMLElement && (typing.isContentEditable || /^(INPUT|TEXTAREA)$/.test(typing.tagName))) {
+        const r = typing.getBoundingClientRect()
+        if (r.width || r.height) avoid.push(isTerminal(typing) ? { left: r.left - 40, right: r.right + 160, top: r.top - 20, bottom: r.bottom + 20 } : r)
+      }
+      return { rects: { tabs, sidebar, files, status, panes, dividers, toasts }, avoid }
+    }
+    const pickSeekSpot = (want = null) => {
+      const view = { w: innerWidth, h: innerHeight }
+      const { rects, avoid } = measureSeek()
+      return SEEK.pick(SEEK.spots(rects, view), { view, box: BOX * size, pointer, from: center(), avoid, want })
+    }
+    // Slides along "up" (px, + is further behind the edge) that hide the drawing, show its top, or its eyes,
+    // from the SVG's own extent: read once per hide.
+    const seekGeom = () => {
+      if (seek?.geom) return seek.geom
+      let top = BOX * 0.15
+      let eyesBottom = BOX * 0.55
+      try {
+        const vb = svg.viewBox.baseVal
+        const k = BOX / (vb.height || 120)
+        top = (svg.getBBox().y - vb.y) * k
+        const eyes = parts('eyes')
+        if (eyes.length) eyesBottom = Math.max(...eyes.map((e) => e.getBBox()).map((r) => r.y + r.height - vb.y)) * k
+      } catch {}
+      const g = { duck: HALF + 2 - top, tips: HALF - 6 - top, rest: (b) => Math.round(HALF - 13 - top + ((HALF - 2 - eyesBottom) - (HALF - 13 - top)) * b), pop: -BOX * 0.7 }
+      if (seek) seek.geom = g
+      return g
+    }
+    const seekPoseNow = () => {
+      if (!seek?.pose) return { x: 0, y: seek?.d ?? 0, deg: 0 }
+      const m = new DOMMatrix(getComputedStyle(bob).transform)
+      return { x: m.e, y: m.f, deg: (Math.atan2(m.b, m.a) * 180) / Math.PI }
+    }
+    // Slides to a pose: y (+ is further behind the edge), a little sideways x, a head tilt.
+    const seekPose = (y, ms, { x = 0, deg = 0, easing = 'cubic-bezier(.3,.7,.4,1)' } = {}) => {
+      if (!seek) return null
+      const cur = seekPoseNow()
+      const old = seek.pose
+      seek.pose = bob.animate([t(cur.x, cur.y, cur.deg), t(x, y, deg)], { duration: ms, easing, fill: 'forwards', composite: 'add' })
+      old?.cancel()
+      seek.d = y
+      return seek.pose
+    }
+    const seekBold = () => Math.min(1, (Date.now() - seek.since) / 40000) // 0 → 1 over 40 s unfound
+    const seekRest = () => seekGeom().rest(seekBold()) // the top of its head at first, later the eyes too
+    const seekOut = (k) => {
+      const [nx, ny] = SEEK.OUT[seek.spot.dir]
+      return { x: seek.spot.x + nx * k, y: seek.spot.y + ny * k }
+    }
+    // A hint drifting out of the hiding place: a ✦ or a giggle.
+    const seekHint = (kind = Math.random() < 0.55 ? 'star' : 'giggle') => {
+      if (!seek?.spot) return
+      const [nx, ny] = SEEK.OUT[seek.spot.dir]
+      const p = seekOut(18 * size)
+      const el = document.createElement('div')
+      const [glyph, color] = kind === 'giggle' ? SIGNS.giggle : ['✦', C.sparkle]
+      el.textContent = glyph
+      el.style.cssText = `position:absolute;left:${p.x - 6}px;top:${p.y - 8}px;font:600 ${kind === 'giggle' ? 11 : 10}px/1 var(--app-font-family,system-ui);color:${color};text-shadow:0 0 6px ${color};pointer-events:none;white-space:nowrap`
+      host.appendChild(el)
+      const side = (Math.random() - 0.5) * 22
+      const go = 34 + Math.random() * 18
+      el.animate(
+        [
+          { transform: 'translate(0,0) scale(.5)', opacity: 0 },
+          { transform: `translate(${nx * go * 0.4 + ny * side * 0.3}px,${ny * go * 0.4 + nx * side * 0.3}px) scale(1)`, opacity: 0.95, offset: 0.3 },
+          { transform: `translate(${nx * go + ny * side}px,${ny * go + nx * side}px) scale(.8) rotate(${side * 4}deg)`, opacity: 0 }
+        ],
+        { duration: 1700, easing: 'ease-out' }
+      ).onfinish = () => el.remove()
+    }
+    // Leans out to look around, then settles back behind the edge. Bolder the longer it lasts.
+    const seekLean = () => {
+      if (!seek?.spot || seek.ducked) return
+      const b = seekBold()
+      const side = Math.random() < 0.5 ? -1 : 1
+      const out = -6 - 16 * b
+      const tilt = 8 + 8 * b
+      seekPose(out, 380, { x: side * (2 + 4 * b), deg: side * tilt })
+      ears(deg(0, -side * 8, 0), 700)
+      const stay = 700 + 700 * b
+      if (b > 0.3) {
+        seekLater(() => seekPose(out, 520, { x: -side * (2 + 4 * b), deg: -side * tilt }), stay)
+        seekLater(() => seekPose(seekRest(), 320, { easing: 'cubic-bezier(.4,0,.6,1)' }), stay + 1020)
+      } else seekLater(() => seekPose(seekRest(), 320, { easing: 'cubic-bezier(.4,0,.6,1)' }), stay)
+      if (Math.random() < 0.25 + 0.4 * b) seekLater(() => seekHint(), 300)
+    }
+    const seekSchedule = () => {
+      if (!seek) return
+      clearTimeout(seek.next)
+      const b = seekBold()
+      seek.next = seekLater(() => {
+        seekLean()
+        seekSchedule()
+      }, (6000 - 3800 * b) * (0.7 + Math.random() * 0.6))
+    }
+    // Puts it (already invisible) at a spot, clipped and turned, fully behind the edge, then lets the top
+    // of its head come up.
+    const seekAt = (s) => {
+      seek.spot = s
+      spot = { x: s.x - HALF, y: s.y - HALF }
+      home.style.clipPath = CLIP
+      home.style.transform = `translate(${spot.x}px, ${spot.y}px) rotate(${SEEK.ROT[s.dir]}deg)` + (size !== 1 ? ` scale(${size})` : '')
+      seek.pose?.cancel()
+      seek.pose = null
+      loops[0].pause() // the idle bob would move it in and out of the edge
+      loops[0].currentTime = 0
+      const g = seekGeom()
+      seek.d = g.duck
+      seek.ducked = false
+      seek.coming = 0
+      seekPose(g.duck, 1)
+      release() // the fade goes: it is fully behind the edge, so nothing shows yet
+      seekLater(() => seekPose(seekRest(), 700), 700)
+      seekSchedule()
+    }
+    // Cleans up the game. `snap`: put it straight back home (another behaviour takes over).
+    const endSeek = (snap = true) => {
+      if (!seek) return
+      const s = seek
+      seek = null
+      s.timers.forEach(clearTimeout)
+      clearTimeout(s.next)
+      clearTimeout(s.giveUp)
+      clearTimeout(s.resized)
+      s.pose?.cancel()
+      home.style.clipPath = ''
+      loops[0].play()
+      setFace(null)
+      if (LANTERN) later(0, lanternTick) // the lantern comes back once the game is over
+      if (!snap) return
+      release()
+      mode = 'home'
+      place(homeSpot())
+      home.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300 })
+    }
+    // Out from behind the edge (found: happy; given up: smug), then home.
+    const comeHome = async (found) => {
+      if (!seek) return
+      const s = seek
+      s.timers.forEach(clearTimeout)
+      s.timers.clear()
+      clearTimeout(s.next)
+      clearTimeout(s.giveUp)
+      s.ducked = false
+      mode = 'flying'
+      setFace('happy')
+      const g = seekGeom()
+      const pop = seekPose(g.pop, found ? 300 : 520, { easing: 'cubic-bezier(.3,1.5,.5,1)' })
+      if (found) {
+        sparkle(6, BOX * 0.4)
+        sound('pet', 0.05, 0.09)
+        for (let i = 0; i < 3; i++) later(i * 120, () => seekHint(i === 1 ? 'giggle' : 'star'))
+        feel('happy', 0.3)
+      } else {
+        later(400, () => ears(deg(0, -10, 6, 0), 900))
+        later(500, () => seekHint('giggle'))
+        feel('bored', 0.1)
+      }
+      await pop?.finished.catch(() => {})
+      await wait(found ? 350 : 900)
+      if (seek !== s || stopped) return
+      // Off the edge: the clip goes, the turn unwinds on the way home, the slide eases back to 0.
+      endSeek(false)
+      const unslide = bob.animate([t(0, g.pop), t(0, 0)], { duration: 900, easing: 'cubic-bezier(.45,.05,.3,1)', composite: 'add' })
+      await flyTo(homeSpot(), 900)
+      unslide.cancel()
+      if (stopped || mode !== 'flying') return
+      mode = 'home'
+      setFace(null)
+      if (found) {
+        twirl()
+        later(600, () => say(pick(L.found), { force: true }))
+      } else {
+        emote('smug')
+        later(600, () => say(pick(L.notFound), { force: true }))
+      }
+    }
+    // The pointer near its hiding place (called from onPointer, throttled): duck fast, peek again later.
+    const seekNear = (p) => {
+      const now = performance.now()
+      if (now - seek.checked < 50) return
+      seek.checked = now
+      const c = seekOut(16 * size)
+      const d = Math.hypot(p.x - c.x, p.y - c.y)
+      if (d < BOX * 1.7 * size && !seek.ducked) {
+        seek.ducked = true
+        seek.timers.forEach(clearTimeout)
+        seek.timers.clear()
+        clearTimeout(seek.next)
+        seekPose(seekGeom().tips, 140, { easing: 'cubic-bezier(.2,.9,.3,1)' })
+        ears(deg(0, -12, 0), 380)
+        if (now - seek.startled > 4000) {
+          seek.startled = now
+          const q = seekOut(26 * size)
+          floatUp('!', C.alert, { x: q.x - 3, y: q.y - 10, rise: 14, ms: 700 })
+        }
+      } else if (seek.ducked && d > BOX * 2.65 * size && !seek.coming) {
+        seek.coming = seekLater(() => {
+          seek.coming = 0
+          seek.ducked = false
+          seekPose(seekRest(), 600)
+          seekSchedule()
+        }, 900 + Math.random() * 600)
+      } else if (seek.ducked && d <= BOX * 2.65 * size && seek.coming) {
+        clearTimeout(seek.coming)
+        seek.timers.delete(seek.coming)
+        seek.coming = 0
+      }
+    }
+    // Hides now. `want` (a spot name: tabs, sidebar, files, status, pane, divider, toast, window) is for
+    // previews; normally any spot will do.
+    const hide = (want = null) => {
+      if (seek) endSeek()
+      if (!['home', 'asleep'].includes(mode) || drag) return false
+      wake()
+      busy?.cancel()
+      busy = null
+      hush()
+      hideLantern(false) // a lit lantern would give the hiding place away
+      mode = 'hiding'
+      seek = { spot: null, since: Date.now(), timers: new Set(), next: 0, giveUp: 0, resized: 0, pose: null, d: 0, ducked: false, coming: 0, checked: 0, startled: 0, geom: null }
+      const s = seek
+      hold([{ opacity: 1, transform: `${home.style.transform} scale(1)` }, { opacity: 0, transform: `${home.style.transform} scale(.4)` }], { duration: 280, fill: 'forwards' }).onfinish = () => {
+        if (seek !== s || stopped) return
+        const where = pickSeekSpot(want)
+        if (!where) return endSeek()
+        seekAt(where)
+        s.giveUp = setTimeout(() => seek === s && !stopped && comeHome(false), SEEK_GIVE_UP)
+      }
+      return true
+    }
+    // Window resized while it hides: the rects moved, so it finds a new place of the same kind.
+    const reseek = () => {
+      if (!seek?.spot) return
+      const where = pickSeekSpot(seek.spot.name)
+      if (where) seekAt(where)
+    }
+
+    // ---------- git (opt-in): a stamp on commit, a paper plane on push ----------
+    // Only the line you sent is read (gitMoment above); a chain counts its last commit/push.
+    const stamp = () => {
+      if (mode !== 'home') return
+      const side = sideOf()
+      const S = BOX * 0.6 * size
+      const px = center().x + side * BOX * 0.8 * size
+      const py = spot.y + BOX * 0.12 * size
+      // It leans over and presses; the mark lands at the press and glows, with a ring spreading out of it.
+      act(at([t(0, 0), t(side * 2, -7, side * 6, 0.96, 1.06), t(side * 2, -7, side * 6, 0.96, 1.06), t(side * 3, 3, side * 8, 1.06, 0.92), t(side * 2, 0, side * 5), t(side * 2, 0, side * 5), t(0, 0)], [0, 0.2, 0.34, 0.46, 0.56, 0.82, 1]), 2200)
+      ears(at(deg(0, 8, 0), [0, 0.5, 1]), 2200)
+      setFace('happy', 2300)
+      const land = 2200 * 0.46
+      const mark = prop(host, '✓', `left:${px - S / 2}px;top:${py - S / 2}px;width:${S}px;height:${S}px;border-radius:50%;border:${Math.max(2, S * 0.07)}px solid ${C.heart};box-shadow:0 0 10px ${C.heart};color:${C.heart};display:grid;place-items:center;font:800 ${Math.round(S * 0.55)}px/1 system-ui;text-shadow:0 0 6px ${C.heart};opacity:0`)
+      if (T.reducedMotion?.()) {
+        mark.animate([{ opacity: 1 }, { opacity: 1, offset: 0.8 }, { opacity: 0 }], { duration: 1600 }).onfinish = () => mark.remove()
+        return
+      }
+      mark.animate(
+        [
+          { opacity: 0, transform: 'scale(1.5) rotate(-18deg)' },
+          { opacity: 1, transform: 'scale(.92) rotate(-8deg)', offset: 0.08 },
+          { opacity: 1, transform: 'scale(1) rotate(-8deg)', offset: 0.75 },
+          { opacity: 0, transform: 'translateY(-10px) scale(1.04) rotate(-8deg)' }
+        ],
+        { duration: 2400, delay: land, easing: 'ease-out', fill: 'backwards' }
+      ).onfinish = () => mark.remove()
+      later(land, () => {
+        const ring = prop(host, '', `left:${px - S * 0.5}px;top:${py - S * 0.5}px;width:${S}px;height:${S}px;border-radius:50%;border:2.5px solid ${C.heart};box-shadow:0 0 12px ${C.heart}`)
+        ring.animate([{ opacity: 0.9, transform: 'scale(.7)' }, { opacity: 0, transform: 'scale(2)' }], { duration: 700, easing: 'ease-out' }).onfinish = () => ring.remove()
+        sound('star', 0.05, 0.09)
+      })
+      feel('happy', 0.25)
+    }
+    const PLANE = `<svg viewBox="0 0 40 28" width="100%" height="100%" style="overflow:visible"><path d="M2 13L38 2 28 26 21 17z" fill="${C.note}" stroke="${C.dim}" stroke-width="1.3" stroke-linejoin="round"/><path d="M38 2L21 17 18 26 15 15z" fill="${C.calm}" stroke="${C.dim}" stroke-width="1.1" stroke-linejoin="round"/></svg>`
+    const plane = () => {
+      if (mode !== 'home') return
+      const side = sideOf()
+      const W = BOX * 0.72 * size
+      const x0 = center().x + side * BOX * 0.53 * size
+      const y0 = spot.y + BOX * 0.22 * size
+      const sheet = prop(host, PLANE, `left:${x0 - W / 2}px;top:${y0 - W * 0.35}px;width:${W}px;height:${W * 0.7}px;opacity:0;filter:drop-shadow(0 0 5px ${C.note})`)
+      if (T.reducedMotion?.()) {
+        sheet.animate([{ opacity: 1 }, { opacity: 1, offset: 0.7 }, { opacity: 0 }], { duration: 1600 }).onfinish = () => sheet.remove()
+        return
+      }
+      // Unfolds out of a crease, then flies a curve up and off the top-right corner, a glitter trail behind.
+      const x1 = innerWidth + 50
+      const y1 = -50
+      const cx = x0 + (x1 - x0) * 0.3
+      const cy = y0 - 90
+      const N = 14
+      const on = (u) => [(1 - u) * (1 - u) * x0 + 2 * (1 - u) * u * cx + u * u * x1, (1 - u) * (1 - u) * y0 + 2 * (1 - u) * u * cy + u * u * y1]
+      const frames = [{ opacity: 0, offset: 0, transform: 'translate(0,0) scale(.3,1) rotate(-30deg)' }, { opacity: 1, offset: 0.2, transform: 'translate(0,0) scale(1) rotate(-30deg)' }, { opacity: 1, offset: 0.3, transform: 'translate(-4px,2px) scale(1) rotate(-40deg)' }]
+      const dur = 1700 + Math.hypot(x1 - x0, y1 - y0) * 1.3
+      for (let i = 1; i <= N; i++) {
+        const u = i / N
+        const [px, py] = on(u)
+        const [qx, qy] = on(Math.min(1, u + 0.02))
+        const ang = (Math.atan2(qy - py, qx - px) * 180) / Math.PI
+        frames.push({ opacity: 1, offset: 0.3 + 0.7 * u, transform: `translate(${(px - x0).toFixed(1)}px,${(py - y0).toFixed(1)}px) rotate(${ang.toFixed(1)}deg) scale(${(1 - u * 0.25).toFixed(2)})` })
+      }
+      sheet.animate(frames, { duration: dur, easing: 'cubic-bezier(.4,.1,.7,.9)', fill: 'forwards' }).onfinish = () => sheet.remove()
+      for (let i = 1; i < 10; i++) {
+        const u = 0.3 + (i / 10) * 0.65
+        later(dur * u, () => {
+          const [px, py] = on(((u - 0.3) / 0.7) * 0.97)
+          floatUp(i % 2 ? '✦' : '✧', i % 2 ? C.sparkle : C.note, { x: px, y: py, rise: 16, ms: 1100, px: 14 + (i % 3) * 3 })
+        })
+      }
+      // Wind-up and throw: crouches back, flings up and to the side, then watches it go.
+      act(at([t(0, 0), t(-side * 3, 3, -side * 10, 1.05, 0.93), t(-side * 3, 3, -side * 10, 1.05, 0.93), t(side * 4, -9, side * 16, 0.94, 1.1), t(side * 3, -4, side * 10), t(side * 3, -4, side * 10), t(0, 0)], [0, 0.18, 0.3, 0.44, 0.58, 0.88, 1]), 3000)
+      animateParts('flutter', [{ transform: 'scaleX(1)' }, { transform: 'scaleX(1.2)', offset: 0.44 }, { transform: 'scaleX(1)' }], { duration: 3000, composite: 'add' })
+      later(700, () => sound('follow', 0.04, 0.08))
+      feel('happy', 0.25)
+    }
+    reactions.gitCommit ??= stamp
+    reactions.gitPush ??= plane
+
+    // ---------- caught in the act (opt-in): it was doing something of its own when you came back ----------
+    // A scene is an act whose run() returns a cleanup function (the prop goes away when it jumps); the
+    // built-in `juggle` is one. It jumps, hides the prop, blushes, says a `caught` line, then the warm
+    // half of the welcome.
+    const CAUGHT = cfg.caught ? (typeof cfg.caught === 'object' ? cfg.caught : {}) : null
+    let lastCaught = -Infinity
+    let lastScene = ''
+    let caughtScene = null
+    const caught = (force = false) => {
+      if (!force && (!CAUGHT || Date.now() - lastCaught < (CAUGHT.cooldown ?? 30 * 60000) || !free() || busy || Math.random() > (CAUGHT.chance ?? 0.6))) return false
+      if (!free() || caughtScene) return false
+      const names = (CAUGHT?.scenes ?? ['juggle']).filter((n) => acts[n])
+      const pool = names.filter((n) => n !== lastScene)
+      const name = typeof force === 'string' && acts[force] ? force : pool[(Math.random() * pool.length) | 0] ?? names[0]
+      if (!name) return false
+      lastScene = name
+      lastCaught = Date.now()
+      busy?.cancel()
+      busy = null
+      let cleanup = acts[name]()
+      const sc = (caughtScene = { timer: 0, hold: null })
+      const stop = () => {
+        if (caughtScene !== sc) return
+        caughtScene = null
+        clearTimeout(sc.timer)
+        try {
+          typeof cleanup === 'function' && cleanup()
+        } catch {}
+        cleanup = null
+        if (busy === sc.hold) busy = null
+      }
+      sc.stop = stop
+      sc.hold = { cancel: stop, playState: 'running' }
+      busy = sc.hold
+      sc.timer = setTimeout(() => {
+        if (stopped || caughtScene !== sc) return
+        // Then you are back: it jumps, the prop goes away, and it acts as if nothing happened.
+        emote('surprised')
+        feel('worried', 0.2)
+        try {
+          typeof cleanup === 'function' && cleanup()
+        } catch {}
+        cleanup = null
+        bob.animate(at([t(0, 0), t(0, -16, 0, 0.9, 1.14), t(0, -16, 0, 0.9, 1.14), t(0, 0, 0, 1.06, 0.92), t(0, 0)], [0, 0.2, 0.38, 0.62, 1]), { duration: 900, composite: 'add', easing: 'ease-out' })
+        ears(at(deg(0, -16, -16, 0), [0, 0.2, 0.7, 1]), 1400)
+        sound('star', 0.04)
+        sc.timer = setTimeout(() => {
+          if (stopped || caughtScene !== sc) return
+          // Flustered: little marks, rocks side to side as if hands were behind its back.
+          for (let i = 0; i < 3; i++) later(i * 220, () => floatUp(SIGNS.blush[0], SIGNS.blush[1], { x: spot.x + BOX * 0.1 + i * BOX * 0.34, y: spot.y + BOX * 0.15 + (i % 2) * 8, rise: 16, ms: 1400 }))
+          bob.animate([t(0, 0), t(-3, 0, -8), t(3, 0, 8), t(-3, 0, -8), t(3, 0, 8), t(0, 0)], { duration: 1800, composite: 'add' })
+          later(500, () => say(pick(L.caught), { force: true }))
+          sc.timer = setTimeout(() => {
+            if (caughtScene !== sc) return
+            stop()
+            // The usual welcome, but quiet: it has already jumped and spoken.
+            if (!stopped && mode === 'home') {
+              sparkle(6)
+              sound('welcome', 0.04, 0.11)
+              feel('happy', 0.4)
+              mood.bored = 0
+            }
+          }, 2300)
+        }, 1100)
+      }, 1300)
+      return true
+    }
+
+    // ---------- nuzzle (opt-in): the pointer rests on it for a moment and it leans in to rub against it ----------
+    const NUZZLE = cfg.nuzzle ? (typeof cfg.nuzzle === 'object' ? cfg.nuzzle : {}) : null
+    let nuzzleTimer = 0
+    let nuzzleAt = -Infinity
+    let restAt = null
+    const nuzzle = (force = false) => {
+      if (!force && (!free() || busy || performance.now() - nuzzleAt < (NUZZLE?.cooldown ?? 90000) || !pointer || petFlips > 1)) return false
+      if (stopped || mode !== 'home') return false
+      nuzzleAt = performance.now()
+      const c = center()
+      const dx = (pointer?.x ?? c.x) - c.x
+      const dy = (pointer?.y ?? c.y) - c.y
+      const d = Math.sign(dx) || 1
+      const lean = Math.min(11, 5 + Math.abs(dx) / 5)
+      const up = Math.max(-5, Math.min(5, dy / 6))
+      // Leans a long way toward it, rubs back and forth three times, eyes closed in contentment.
+      act(at([t(0, 0), t(d * lean, up + 2, d * 18, 1.08, 0.95), t(d * (lean - 3), up, d * 10, 1.06, 0.97), t(d * (lean + 2), up + 1, d * 22, 1.08, 0.95), t(d * (lean - 3), up, d * 10, 1.06, 0.97), t(d * (lean + 2), up + 1, d * 22, 1.08, 0.95), t(d * (lean - 2), up, d * 12), t(d * (lean - 2), up, d * 12), t(0, 0)], [0, 0.14, 0.28, 0.4, 0.52, 0.64, 0.74, 0.88, 1]), 3000)
+      ears(at(deg(0, -d * 14, -d * 14, 0), [0, 0.18, 0.8, 1]), 3000)
+      setFace('happy', 3100)
+      const hx = c.x + d * BOX * 0.53 * size
+      floatUp('♡', C.heart, { x: hx - 8, y: spot.y - 4 * size, rise: 40, ms: 2400, px: 30 + 4 * size })
+      later(700, () => floatUp('♡', C.heart, { x: hx + 8, y: spot.y + 4 * size, rise: 34, ms: 2000, px: 20 + 3 * size }))
+      sound('pet', 0.04)
+      feel('happy', 0.3)
+      touched()
+      return true
+    }
+    // The pointer must have been still on it for `after` ms, and not be rubbing it (petting is its own thing).
+    const onRest = (e) => {
+      if (mode !== 'home' || drag || e.buttons) return
+      if (restAt && Math.hypot(e.clientX - restAt.x, e.clientY - restAt.y) < 3) return
+      restAt = { x: e.clientX, y: e.clientY }
+      clearTimeout(nuzzleTimer)
+      nuzzleTimer = setTimeout(() => !stopped && petFlips === 0 && nuzzle(), NUZZLE?.after ?? 2500)
+    }
+    const offRest = () => {
+      clearTimeout(nuzzleTimer)
+      restAt = null
+    }
+    if (NUZZLE) {
+      home.addEventListener('pointermove', onRest)
+      home.addEventListener('pointerleave', offRest)
+      home.addEventListener('pointerdown', offRest)
+    }
+    reactions.nuzzle ??= () => nuzzle(true)
+
+    // ---------- read-along (opt-in): on a Markdown tab it leans toward the editor and nods as it reads ----------
+    // A `glasses` part in the drawing (hidden otherwise) goes on for the while. Comes off when the tab
+    // changes, it is moved or put to sleep, or it has read for `for` ms.
+    const READ = cfg.readAlong ? (typeof cfg.readAlong === 'object' ? cfg.readAlong : {}) : null
+    for (const el of parts('glasses')) el.style.opacity = '0'
+    let reading = null
+    let lastRead = -Infinity
+    const activeTab = () => document.querySelector('[data-testid="sortable-tab"][data-active="true"]')
+    const tabTitle = (tab) => tab?.getAttribute('data-tab-title') ?? tab?.textContent ?? ''
+    const endReading = () => {
+      if (!reading) return
+      const r = reading
+      reading = null
+      clearTimeout(r.timer)
+      r.anims.forEach((a) => a.cancel())
+      for (const el of parts('eyes')) el.style.transform = ''
+      for (const el of parts('glasses')) el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-7px)' }], { duration: 320 }).onfinish = () => (el.style.opacity = '0')
+      if (busy === r.hold) busy = null
+      // Looks up from the page with a small hop of relief.
+      if (!stopped && mode === 'home' && !drag) bob.animate([t(0, 0), t(0, -5, 0, 0.97, 1.05), t(0, 0)], { duration: 500, composite: 'add', easing: 'ease-out' })
+    }
+    const read = (force = false) => {
+      if (reading) return true
+      const tab = activeTab()
+      if (!force && (!READ || !free() || busy || !tab || !isReadable(tabTitle(tab)) || Date.now() - lastRead < (READ.every ?? 8 * 60000) || Date.now() - lastActive > 90000 || Math.random() > (READ.chance ?? 0.5))) return false
+      if (!free()) return false
+      lastRead = Date.now()
+      const ed = document.querySelector('.monaco-editor, .markdown-body, [data-testid="markdown-preview"]')
+      const r = ed?.getBoundingClientRect()
+      const dir = r ? Math.sign(r.left + r.width / 2 - center().x) || 1 : 1
+      const rd = (reading = { tab, anims: [], timer: 0, until: Date.now() + (READ?.for ?? 45000), hold: null })
+      rd.hold = { cancel: endReading, playState: 'running' }
+      busy?.cancel()
+      busy = rd.hold
+      for (const el of parts('glasses')) {
+        el.style.opacity = ''
+        el.animate([{ opacity: 0, transform: 'translateY(-6px) scale(1.15)' }, { opacity: 1, transform: 'translateY(1px) scale(1)', offset: 0.6 }, { opacity: 1, transform: 'none' }], { duration: 650, easing: 'ease-out' })
+      }
+      rd.anims.push(
+        bob.animate([t(0, 0), t(dir * 3, -3, dir * 4), t(dir * 4, 3, dir * 12, 1.02, 0.97)], { duration: 1100, delay: 500, easing: 'ease-in-out', fill: 'forwards', composite: 'add' }),
+        // Slow, absorbed nodding as it reads on.
+        bob.animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${dir * 3}deg)` }], { duration: 1500, delay: 1700, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out', composite: 'add' })
+      )
+      sparkle(5, BOX * 0.4)
+      for (const el of parts('eyes')) el.style.transform = `translate(${dir * 2}px,1.2px)`
+      later(1500, () => reading === rd && floatUp('…', C.calm, { x: center().x + BOX * 0.25 * size, y: center().y - BOX * 0.56 * size, rise: 20, ms: 2200 }))
+      return true
+    }
+    const readTick = () => {
+      if (stopped) return
+      if (reading) {
+        const tab = activeTab()
+        if (tab !== reading.tab || !isReadable(tabTitle(tab)) || mode !== 'home' || drag || document.hidden || Date.now() > reading.until) endReading()
+      } else read()
+    }
+    const readTimer = READ ? setInterval(readTick, 4000) : 0
+
+    // ---------- lantern (opt-in): lit the first time it is home after `from` o'clock, kept through the evening ----------
+    // Also across reloads (the day it was lit is in the bond), put out at the `until` o'clock day roll.
+    const LANTERN = cfg.lantern ? (typeof cfg.lantern === 'object' ? cfg.lantern : {}) : null
+    const LANTERN_SVG =
+      LANTERN?.svg ??
+      '<svg viewBox="0 0 24 36" width="100%" height="100%" style="overflow:visible"><path d="M12 1v5" stroke="#b08a4a" stroke-width="1.6" stroke-linecap="round"/><path d="M6 7h12l-1.5 3h-9z" fill="#8a4b2a"/><path d="M7 10h10c1.6 4.5 1.6 10 0 14.5H7C5.4 20 5.4 14.5 7 10z" fill="#ffd98a" stroke="#c9963f" stroke-width="1.1"/><path d="M12 14c2.2 2.6 2.2 5.6 0 8-2.2-2.4-2.2-5.4 0-8z" fill="#fff5d6"/><path d="M6.5 24.5h11l-1.5 3h-8z" fill="#8a4b2a"/><path d="M12 28v4" stroke="#b08a4a" stroke-width="1.4"/></svg>'
+    let lantern = null
+    const lanternDay = () => new Date(Date.now() - (LANTERN?.until ?? 5) * 3600000).toLocaleDateString('sv') // the evening's day key: rolls at `until` o'clock
+    const showLantern = (ceremony) => {
+      if (lantern || stopped) return
+      const left = center().x > innerWidth / 2 // keep it on the roomier side
+      const W = BOX * 0.4
+      const H = BOX * 0.62
+      const box = prop(home, '', `${left ? 'right' : 'left'}:${BOX * 0.94}px;top:${BOX * 0.22}px;width:${W}px;height:${H}px`)
+      const halo = prop(box, '', `left:${-W * 1.3}px;top:${-H * 0.6}px;width:${W * 3.6}px;height:${W * 3.6}px;border-radius:50%;background:radial-gradient(closest-side,color-mix(in srgb,${C.alert} 85%,transparent),color-mix(in srgb,${C.alert} 35%,transparent) 55%,transparent);opacity:0;mix-blend-mode:screen`)
+      const body = prop(box, LANTERN_SVG, `left:0;top:0;width:${W}px;height:${H}px;transform-origin:50% 0;opacity:0`)
+      const Lt = (lantern = { box, halo, body, anims: [] })
+      if (T.reducedMotion?.()) {
+        body.style.opacity = '1'
+        halo.style.opacity = '.7'
+        return
+      }
+      Lt.anims.push(
+        // Sways softly like a hanging lamp, and breathes a warm light.
+        body.animate([{ transform: 'rotate(-5deg)' }, { transform: 'rotate(5deg)' }], { duration: 2600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out', delay: 700 }),
+        halo.animate([{ opacity: 0.55, transform: 'scale(.94)' }, { opacity: 0.9, transform: 'scale(1.06)' }], { duration: 1800, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out', delay: 900 })
+      )
+      // Lights: the lantern rises into place from below, the flame catches, the glow blooms.
+      body.animate([{ opacity: 0, transform: 'translateY(18px) scale(.6)' }, { opacity: 1, transform: 'translateY(-2px) scale(1.05)', offset: 0.7 }, { opacity: 1, transform: 'none' }], { duration: ceremony ? 900 : 400, easing: 'ease-out' })
+      halo.animate([{ opacity: 0, transform: 'scale(.4)' }, { opacity: ceremony ? 1 : 0.7, transform: 'scale(1.15)', offset: 0.6 }, { opacity: 0.7, transform: 'scale(1)' }], { duration: ceremony ? 1500 : 600, delay: ceremony ? 700 : 0, easing: 'ease-out', fill: 'backwards' })
+      body.style.opacity = '1'
+      halo.style.opacity = '.7'
+      if (ceremony) {
+        sparkle(6, BOX * 0.53)
+        sound('welcome', 0.04, 0.2)
+        for (let i = 0; i < 3; i++) later(800 + i * 260, () => lantern === Lt && floatUp(i % 2 ? '✦' : '·', C.alert, { x: center().x + (left ? -1 : 1) * BOX * 0.62 * size, y: spot.y + 4 * size, rise: 26, ms: 1400 }))
+      }
+    }
+    const hideLantern = (ceremony) => {
+      if (!lantern) return
+      const Lt = lantern
+      lantern = null
+      Lt.anims.forEach((a) => a.cancel())
+      if (stopped || !ceremony || T.reducedMotion?.()) return Lt.box.remove()
+      // Blows it out: the glow gasps and fades, a wisp goes up, the lantern sinks away.
+      Lt.halo.animate([{ opacity: 0.8 }, { opacity: 1, offset: 0.12 }, { opacity: 0 }], { duration: 900, fill: 'forwards' })
+      Lt.body.animate([{ opacity: 1, transform: 'none' }, { opacity: 1, transform: 'none', offset: 0.5 }, { opacity: 0, transform: 'translateY(14px) scale(.7)' }], { duration: 1400, fill: 'forwards', easing: 'ease-in' }).onfinish = () => Lt.box.remove()
+      floatUp('~', C.dim, { x: center().x + (Lt.box.style.right ? -1 : 1) * BOX * 0.62 * size, y: spot.y + 4 * size, rise: 30, ms: 1500, px: 18 })
+    }
+    const lanternTick = (force = false) => {
+      if (stopped || !LANTERN) return
+      const phase = force ? 'light' : lanternPhase({ hour: new Date().getHours(), day: lanternDay(), lit: bond.lanternDay, from: LANTERN.from ?? 18, until: LANTERN.until ?? 5 })
+      if (phase === 'out') return void (lantern && hideLantern(!away()))
+      if (phase === 'keep') return void (!lantern && mode !== 'hiding' && showLantern(false))
+      if (!force && (away() || mode !== 'home' || drag)) return // lights it when it is home and you are here
+      bond.lanternDay = lanternDay()
+      saveBond()
+      showLantern(true)
+      if (mode === 'home') later(1200, () => say(pick(L.lantern), { force: true }))
+    }
+    const firstLantern = LANTERN ? setTimeout(lanternTick, 6000) : 0
+    const lanternTimer = LANTERN ? setInterval(lanternTick, 30000) : 0
 
     // ---------- what character files and dev tools can use ----------
     const api = {
@@ -1198,7 +2117,30 @@
       },
       chime: (freqs, gain = 0.05, gap) => S && chime(freqs, gain * (S.gain ?? 1), gap),
       play,
-      animateParts
+      animateParts,
+      openTab,
+      // Your own audio (see "audio" above), and the opt-in behaviours, each callable now for a preview.
+      asset,
+      playAudio,
+      stopAudio,
+      sing,
+      hide,
+      found: () => Boolean(seek) && (comeHome(true), true),
+      giveUp: () => Boolean(seek) && (comeHome(false), true),
+      get hiding() {
+        return seek && { spot: seek.spot, ducked: seek.ducked, bold: seekBold() }
+      },
+      seekSpots: () => SEEK.spots(measureSeek().rects, { w: innerWidth, h: innerHeight }),
+      caught: (scene = true) => (wake(), busy?.cancel(), (busy = null), caught(scene)),
+      nuzzle: () => nuzzle(true),
+      read: (on = true) => (on ? read(true) : (endReading(), true)),
+      get reading() {
+        return Boolean(reading)
+      },
+      lantern: (on = true) => (on ? (hideLantern(false), (bond.lanternDay = ''), lanternTick(true), true) : (hideLantern(true), true)),
+      get lit() {
+        return Boolean(lantern)
+      }
     }
     T.companions.set(id, api)
     meetToday()
@@ -1220,9 +2162,15 @@
       cancelAnimationFrame(followRaf)
       cancelAnimationFrame(gazeQueued)
       cancelAnimationFrame(statusQueued)
-      for (const timer of [faceTimer, glowTimer, sleepTimer, zTimer, clickTimer, idleTimer, blinkTimer, petReset, landTimer, welcomeTimer]) clearTimeout(timer)
-      for (const timer of [reposition, moodTimer, statusTimer, bondTimer]) clearInterval(timer)
+      for (const timer of [faceTimer, glowTimer, sleepTimer, zTimer, clickTimer, idleTimer, blinkTimer, petReset, landTimer, welcomeTimer, nuzzleTimer, firstLantern]) clearTimeout(timer)
+      for (const timer of [reposition, moodTimer, statusTimer, bondTimer, readTimer, lanternTimer]) clearInterval(timer)
       clearTimeout(meetTimer)
+      endSeek(false)
+      stopSing()
+      stopAudio()
+      caughtScene?.stop()
+      endReading()
+      hideLantern(false)
       hush()
       saveBond()
       toasts.disconnect()
@@ -1239,6 +2187,9 @@
       removeEventListener('compositionupdate', onTypeSway, { capture: true })
       removeEventListener('keydown', onTypedChar, { capture: true })
       removeEventListener('compositionend', onTypedIme, { capture: true })
+      removeEventListener('keydown', hushAudio, true)
+      removeEventListener('pointerdown', hushAudio, true)
+      document.removeEventListener('visibilitychange', hushAudio)
       for (const ev of activity) removeEventListener(ev, wake, { capture: true })
       try {
         cfg.onStop?.(api)
