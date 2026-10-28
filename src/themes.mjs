@@ -88,6 +88,24 @@ export function publicState(library, settings) {
     snippets: library.snippets.map(strip),
     themeId: settings.themeId,
     enabledSnippets: settings.enabledSnippets,
-    enabledTouches: settings.enabledTouches
+    enabledTouches: settings.enabledTouches,
+    // settings.json "companions": each pet's settings panel (only what differs from its defaults).
+    companions: settings.companions ?? {}
   }
+}
+
+/**
+ * A pet's settings as its panel sent them: a touch id and a plain JSON object of modest size, else null.
+ * The page normalizes it again on every read, so this only keeps junk and huge payloads out of settings.json.
+ */
+export function companionConfig(id, value) {
+  if (typeof id !== 'string' || !/^[\w-]{1,64}$/.test(id)) return null
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  let text
+  try {
+    text = JSON.stringify(value)
+  } catch {
+    return null
+  }
+  return text.length <= 16384 ? JSON.parse(text) : null
 }

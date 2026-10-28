@@ -9,7 +9,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { launchWithPipe } from './cdp-pipe.mjs'
-import { composeCss, loadLibrary, publicState } from './themes.mjs'
+import { composeCss, loadLibrary, publicState, companionConfig } from './themes.mjs'
 import { buildRuntimeSource } from './runtime-source.mjs'
 import { seedBundled } from './seed.mjs'
 import { prepareFixes } from './fixes/index.mjs'
@@ -58,7 +58,9 @@ function readSettings() {
     soundRestore: null,
     soundAppliedFor: null,
     // Optional runtime fixes (src/fixes); off unless listed here, e.g. ["claude-restart-after-switch"].
-    enabledFixes: []
+    enabledFixes: [],
+    // Each pet's settings panel, by touch id: only what differs from that pet's defaults.
+    companions: {}
   }
   try {
     return { ...defaults, ...JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')) }
@@ -529,6 +531,11 @@ cdp.on('Runtime.bindingCalled', async ({ name, payload: raw }, sessionId) => {
   } else if (message.type === 'toggle-touch' && typeof message.id === 'string') {
     const on = settings.enabledTouches.includes(message.id)
     settings.enabledTouches = on ? settings.enabledTouches.filter((id) => id !== message.id) : [...settings.enabledTouches, message.id]
+  } else if (message.type === 'companion-config') {
+    // A pet's settings panel: what differs from its defaults (the page normalizes it again on read).
+    const config = companionConfig(message.id, message.config)
+    if (!config) return log('companion-config rejected')
+    settings.companions = { ...settings.companions, [message.id]: config }
   } else {
     return
   }
