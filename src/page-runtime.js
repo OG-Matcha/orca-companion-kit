@@ -225,11 +225,8 @@
         <div class="otp-foot">主題在 ~/.orca/themer/themes、小巧思在 ~/.orca/themer/touches，存檔就會即時套用</div>
       </div>`
     root.querySelector('[data-close]').addEventListener('click', closePicker)
+    // No Esc here: Esc belongs to Claude Code in the terminal. Ctrl+Alt+T again, the scrim or a pick closes it.
     root.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        closePicker()
-      }
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         const items = [...root.querySelectorAll('.otp-row')]
         const i = items.indexOf(document.activeElement)
