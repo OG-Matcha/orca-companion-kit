@@ -15,7 +15,7 @@
 
   // ---------- look ----------
   const CSS = `
-#${ROOT_ID}{position:fixed;inset:0;z-index:2147483000;font:13px/1.5 var(--app-font-family,system-ui,sans-serif);color:var(--popover-foreground,#eee);
+#${ROOT_ID}{position:fixed;inset:0;z-index:2147483000;pointer-events:auto;font:13px/1.5 var(--app-font-family,system-ui,sans-serif);color:var(--popover-foreground,#eee);
   --ocs-bg:var(--popover,#1b1b24);--ocs-fg:var(--popover-foreground,#eee);--ocs-muted:var(--muted-foreground,#9a9aa8);--ocs-line:color-mix(in srgb,var(--border,#444) 70%,transparent);
   --ocs-edge:var(--border,#444);--ocs-hover:color-mix(in srgb,var(--accent,#333) 70%,transparent);--ocs-primary:var(--primary,#8c8ff0);--ocs-on-primary:var(--primary-foreground,#fff);--ocs-ring:var(--ring,var(--primary,#8c8ff0))}
 #${ROOT_ID} *{box-sizing:border-box}

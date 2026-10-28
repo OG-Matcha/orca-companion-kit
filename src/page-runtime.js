@@ -78,7 +78,7 @@
   }
 
   const UI_CSS = `
-#${PICKER_ID}{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:start center;padding-top:12vh;font:13px/1.45 var(--app-font-family,system-ui)}
+#${PICKER_ID}{position:fixed;inset:0;z-index:2147483000;pointer-events:auto;display:grid;place-items:start center;padding-top:12vh;font:13px/1.45 var(--app-font-family,system-ui)}
 #${PICKER_ID} .otp-scrim{position:absolute;inset:0;background:color-mix(in srgb,var(--background) 55%,transparent);backdrop-filter:blur(2px)}
 #${PICKER_ID} .otp-panel{position:relative;width:min(420px,calc(100vw - 32px));max-height:70vh;display:flex;flex-direction:column;background:var(--popover);color:var(--popover-foreground);border:1px solid var(--border);border-radius:12px;box-shadow:0 24px 64px -12px rgb(0 0 0/.55);overflow:hidden;transform-origin:50% 0;animation:otp-in .18s cubic-bezier(.2,.8,.2,1)}
 #${PICKER_ID}[data-closing] .otp-panel{animation:otp-out .14s ease-in forwards}
