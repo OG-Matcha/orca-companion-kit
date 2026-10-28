@@ -573,6 +573,7 @@ let devTimer = null
 if (process.env.ORCA_THEMER_DEV === '1') {
   const devDir = path.join(ROOT, 'dev')
   fs.mkdirSync(devDir, { recursive: true })
+  let screencast = null // the open-ended recording, when one runs (screencast-start)
   const mainSession = async () => {
     const seen = []
     for (const sessionId of sessions.keys()) {
@@ -587,10 +588,18 @@ if (process.env.ORCA_THEMER_DEV === '1') {
     for (const name of fs.readdirSync(devDir).filter((n) => n.endsWith('.cmd.json'))) {
       const file = path.join(devDir, name)
       const out = file.replace(/\.cmd\.json$/, '.result.json')
+      // A long command (cdp-seq, trace) overlaps the next tick: the file is taken before it is parsed, so
+      // a tick that finds it already gone moves on instead of answering with an error.
+      let text
+      try {
+        text = fs.readFileSync(file, 'utf8')
+        fs.unlinkSync(file)
+      } catch {
+        continue
+      }
       let result
       try {
-        const command = JSON.parse(fs.readFileSync(file, 'utf8'))
-        fs.unlinkSync(file)
+        const command = JSON.parse(text)
         const sessionId = await mainSession()
         if (!sessionId) throw new Error('main window not attached')
         if (command.cmd === 'screenshot') {
@@ -629,6 +638,58 @@ if (process.env.ORCA_THEMER_DEV === '1') {
           for (const type of ['keyDown', 'keyUp'])
             await cdp.send('Input.dispatchKeyEvent', { type, ...command.event }, sessionId)
           result = { ok: true }
+        } else if (command.cmd === 'cdp') {
+          // Raw CDP call on the main window (or the browser when browser:true), for perf runs and scripted demos.
+          const value = await cdp.send(command.method, command.params ?? {}, command.browser ? undefined : sessionId)
+          result = { ok: true, value }
+        } else if (command.cmd === 'cdp-seq') {
+          // Timed steps [{method, params, wait}] run back to back, so typing and drags play smoothly.
+          for (const step of command.steps) {
+            if (step.method) await cdp.send(step.method, step.params ?? {}, sessionId)
+            if (step.wait) await new Promise((r) => setTimeout(r, step.wait))
+          }
+          result = { ok: true }
+        } else if (command.cmd === 'trace') {
+          // A Chromium trace of the browser for command.ms (perf work: why an animation is not composited,
+          // what a long task did); events land in command.out as a JSON array.
+          const events = []
+          const onData = ({ value }) => events.push(...value)
+          cdp.on('Tracing.dataCollected', onData)
+          const done = new Promise((resolve) => cdp.once('Tracing.tracingComplete', resolve))
+          await cdp.send('Tracing.start', { traceConfig: { includedCategories: command.categories ?? ['devtools.timeline', 'blink.animations', 'cc', 'disabled-by-default-devtools.timeline'] }, transferMode: 'ReportEvents' })
+          await new Promise((r) => setTimeout(r, command.ms ?? 5000))
+          await cdp.send('Tracing.end')
+          await done
+          cdp.off('Tracing.dataCollected', onData)
+          fs.writeFileSync(command.out, JSON.stringify(events))
+          result = { ok: true, events: events.length }
+        } else if (command.cmd === 'screencast-start') {
+          // Open-ended recording: frames land in command.dir as <n>.jpg with a frames.txt of capture timestamps (s).
+          fs.mkdirSync(command.dir, { recursive: true })
+          screencast?.stop()
+          let n = 0
+          const index = fs.openSync(path.join(command.dir, 'frames.txt'), 'w')
+          const onFrame = (params, frameSession) => {
+            if (frameSession !== sessionId) return
+            const name = `${String(n++).padStart(6, '0')}.jpg`
+            fs.writeFileSync(path.join(command.dir, name), Buffer.from(params.data, 'base64'))
+            fs.writeSync(index, `${name} ${params.metadata.timestamp}\n`)
+            cdp.send('Page.screencastFrameAck', { sessionId: params.sessionId }, sessionId).catch(() => {})
+          }
+          cdp.on('Page.screencastFrame', onFrame)
+          await cdp.send('Page.startScreencast', { format: 'jpeg', quality: command.quality ?? 92, everyNthFrame: 1 }, sessionId)
+          screencast = {
+            stop: () => {
+              cdp.off('Page.screencastFrame', onFrame)
+              cdp.send('Page.stopScreencast', {}, sessionId).catch(() => {})
+              fs.closeSync(index)
+              screencast = null
+              return n
+            }
+          }
+          result = { ok: true }
+        } else if (command.cmd === 'screencast-stop') {
+          result = { ok: true, frames: screencast ? screencast.stop() : 0 }
         } else {
           result = { ok: false, error: 'unknown cmd' }
         }

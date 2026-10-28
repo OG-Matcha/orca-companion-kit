@@ -14,7 +14,8 @@
     "cursor": "node tools/cursor-css.mjs",
     "chime": "node tools/make-chime.mjs",
     "guard": "node tools/guard.mjs",
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "node --test \"test/*.test.mjs\"",
+    "perf": "node tools/perf.mjs"
   },
   "dependencies": {
     "@electron/asar": "3.2.17"

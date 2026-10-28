@@ -92,6 +92,7 @@ agent 會先問你幾件事：參考圖、配色、角色個性、招牌動作�
 npm test               # 單元測試
 npm run check          # 檢查 ~/.orca/themer 裡的主題和 touch（效能陷阱、語法）
 npm run check -- --repo
+npm run perf           # 開兩個隔離的 Orca 量 Puff 的效能預算（約 3 分鐘，見 docs/performance.md）
 npm run example        # 複製範例到 ~/.orca/themer
 npm run cursor -- my-cursor.svg 2 2   # SVG 轉成游標 CSS（1x/2x、熱點）
 npm run chime -- ~/.orca/themer/sounds/my-theme.wav 1046.5 1318.5
