@@ -160,6 +160,71 @@
     return true
   }
 
+  // Orca keeps the tab strip of every worktree it has shown mounted, but lays out only the one in front:
+  // another worktree's tabs are in the DOM with a zero-size box, and clicking them does nothing.
+  const TAB = '[data-testid="sortable-tab"]'
+  const shown = (el) => !!el?.isConnected && el.getBoundingClientRect().width > 0
+  const tabById = (id) => (id ? document.querySelector(`${TAB}[data-tab-id="${CSS.escape(id)}"]`) : null)
+  // The tab in front: every mounted worktree has an active tab, the one that counts is laid out.
+  const frontTab = () => {
+    const all = document.querySelectorAll(`${TAB}[data-active="true"]`)
+    return [...all].find(shown) ?? all[0] ?? null
+  }
+  // Orca's own store (zustand): which worktree a tab belongs to, and bringing that worktree to the front.
+  // Found by shape, not by its minified export name; null when this Orca build has none.
+  let orcaStore = null
+  let storeLoad = null
+  const loadStore = () =>
+    (storeLoad ??= (async () => {
+      const u = [...document.querySelectorAll('script[src],link[href]')].map((e) => e.src || e.href).find((s) => s.includes('/store-'))
+      if (!u) return null
+      const mod = await import(u)
+      orcaStore = Object.values(mod).find((v) => typeof v?.getState === 'function' && typeof v.getState().setActiveWorktree === 'function') ?? null
+      return orcaStore
+    })().catch(() => null))
+  const worktreeOfTab = (id) => {
+    const s = orcaStore?.getState()
+    if (!s || !id) return null
+    for (const map of [s.unifiedTabsByWorktree, s.tabsByWorktree]) for (const [wt, tabs] of Object.entries(map ?? {})) if (Array.isArray(tabs) && tabs.some((x) => x?.id === id || x?.entityId === id)) return wt
+    return null
+  }
+  // Where a tab of a worktree not in front is: its worktree's row in the sidebar (or its project's).
+  const worktreeRow = (wt) => {
+    if (!wt) return null
+    const dec = (e) => {
+      try {
+        return decodeURIComponent(e.id)
+      } catch {
+        return e.id
+      }
+    }
+    const rows = [...document.querySelectorAll('[id^="worktree-list-option-"]')].filter(shown)
+    const repo = wt.split('::')[0]
+    return rows.find((e) => dec(e).includes(wt)) ?? rows.find((e) => e.getAttribute('data-repo-header-id') === repo) ?? null
+  }
+  // The box to fly to for a tab: the tab itself when it is laid out, else its worktree's sidebar row.
+  const tabRect = (tab) => {
+    if (shown(tab)) return tab.getBoundingClientRect()
+    const row = worktreeRow(worktreeOfTab(tab?.getAttribute('data-tab-id'))) ?? document.querySelector('.bg-worktree-sidebar[data-os-file-drop-owner]')
+    return row?.getBoundingClientRect() ?? tab.getBoundingClientRect()
+  }
+  // Opens a tab wherever it is: its worktree comes to the front first. 'open' once it is in front, 'gone'
+  // when no worktree has it any more, 'stuck' when it did not come up in time.
+  async function goToTab(id) {
+    let el = tabById(id)
+    if (!shown(el)) {
+      await loadStore()
+      const wt = worktreeOfTab(id)
+      if (orcaStore && !wt && !el) return 'gone'
+      const s = orcaStore?.getState()
+      if (s && wt && s.activeWorktreeId !== wt) s.setActiveWorktree(wt)
+      for (let i = 0; i < 40 && !shown((el = tabById(id))); i++) await wait(100)
+    }
+    if (!shown(el)) return el || orcaStore ? 'stuck' : 'gone'
+    openTab(el)
+    return 'open'
+  }
+
   // ---------- pure rules (no DOM), exposed as T.companionRules so tests can walk them ----------
   // Hide-and-seek: a spot is a point on the edge of something on screen plus `dir`, the way the pet peeks
   // out; the thing hiding it lies on the other side of that line. Rects are plain {left, top, right,
@@ -247,7 +312,7 @@
     if (!evening) return 'out'
     return lit === day ? 'keep' : 'light'
   }
-  T.companionRules = { seek: SEEK, gitMoment, isReadable, lanternPhase, defaultWords: DEFAULT_WORDS, openTab }
+  T.companionRules = { seek: SEEK, gitMoment, isReadable, lanternPhase, defaultWords: DEFAULT_WORDS, openTab, frontTab, goToTab }
 
   // ---------- settings: the catalog the settings panel is drawn from, and the pure helpers ----------
   // Each pet's settings are one object, saved by the launcher as settings.json "companions"[<pet id>]
@@ -1524,7 +1589,10 @@
       if (tab && mode === 'home' && !busy && !drag) {
         mode = 'visiting'
         visitingTab = tab
-        const r = tab.getBoundingClientRect()
+        // A tab of a worktree not in front: it knocks on that worktree's row in the sidebar instead.
+        await loadStore()
+        if (mode !== 'visiting' || visitingTab !== tab || stopped) return
+        const r = tabRect(tab)
         await flyTo(clamp({ x: r.left + r.width / 2 - HALF, y: r.bottom + 2 + edge() }), 800)
         if (mode !== 'visiting' || stopped) return
         knock = bob.animate(deg(0, -9, 7, 0), { duration: 900, iterations: Infinity, composite: 'add' })
@@ -1554,7 +1622,8 @@
         const prev = lastStatus.get(tab)
         lastStatus.set(tab, s)
         if (s === 'working') working = true
-        if (s === 'permission' && !waiting) waiting = tab
+        // The one on screen first: another worktree's tabs are mounted too, only not laid out.
+        if (s === 'permission' && (!waiting || (!shown(waiting) && shown(tab)))) waiting = tab
         if (prev === 'working' && s === 'done') finished = true
         if (prev && prev !== s && s === 'failed') failed = true
       }
@@ -1832,7 +1901,10 @@
     const singleClick = () => {
       if (mode === 'hiding') return seek && comeHome(true) // found it
       if (mode === 'visiting') {
-        openTab(visitingTab)
+        // A tab of another worktree (not laid out): that worktree comes to the front first.
+        const id = visitingTab?.getAttribute('data-tab-id')
+        if (shown(visitingTab) || !id) openTab(visitingTab)
+        else goToTab(id)
         return leaveVisit()
       }
       if (mode === 'asleep') return wake()
@@ -2484,7 +2556,7 @@
     for (const el of parts('glasses')) el.style.opacity = '0'
     let reading = null
     let lastRead = -Infinity
-    const activeTab = () => document.querySelector('[data-testid="sortable-tab"][data-active="true"]')
+    const activeTab = frontTab
     const tabTitle = (tab) => tab?.getAttribute('data-tab-title') ?? tab?.textContent ?? ''
     const endReading = () => {
       if (!reading) return
@@ -2504,8 +2576,8 @@
       if (!force && (!on('read') || !free() || busy || !tab || !isReadable(tabTitle(tab)) || Date.now() - lastRead < (READ.every ?? 8 * 60000) / freq('read') || Date.now() - lastActive > 90000 || Math.random() > (READ.chance ?? 0.5))) return false
       if (!free()) return false
       lastRead = Date.now()
-      const ed = document.querySelector('.monaco-editor, .markdown-body, [data-testid="markdown-preview"]')
-      const r = ed?.getBoundingClientRect()
+      // The editor on screen: another worktree's editors stay mounted with a zero-size box.
+      const r = [...document.querySelectorAll('.monaco-editor, .markdown-body, [data-testid="markdown-preview"]')].map(visibleRect).find(Boolean)
       const dir = r ? Math.sign(r.left + r.width / 2 - center().x) || 1 : 1
       const rd = (reading = { tab, anims: [], timer: 0, until: Date.now() + (READ.for ?? 45000), hold: null })
       rd.hold = { cancel: endReading, playState: 'running' }
@@ -2699,7 +2771,7 @@
         later(6000, readStatus)
       },
       knock: () => {
-        const tab = document.querySelector('[data-testid="sortable-tab"][data-active="true"]') ?? document.querySelector('[data-testid="sortable-tab"]')
+        const tab = frontTab() ?? [...document.querySelectorAll(TAB)].find(shown) ?? document.querySelector(TAB)
         if (!tab) return false
         knockHold = Date.now() + 5500
         visit(tab)

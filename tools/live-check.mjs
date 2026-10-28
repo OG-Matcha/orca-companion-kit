@@ -4,14 +4,17 @@
 //   npm run live-check                          Puff (examples/touches/puff.js) in the Cotton Sky theme
 //   node tools/live-check.mjs --shots DIR       also save screenshots of each step into DIR
 //   node tools/live-check.mjs --keep-work       keep the temp folder (settings.json, user data)
+//   node tools/live-check.mjs --projects-only   only the two-project check below
 //
-// Checks: the picker opens 「寵物設定」; right-click on the pet opens it; ✕, a click outside and Ctrl+Alt+T
+// Checks: with two projects, a tab of the one not in front that waits for permission gets a knock on that
+// project's sidebar row, and a click on the pet switches project and opens the tab. Then: the picker opens 「寵物設定」; right-click on the pet opens it; ✕, a click outside and Ctrl+Alt+T
 // close it; Esc closes neither it nor the picker; every tab renders; every 「試試看」 plays with no page
 // error; a switch that is off stops the behaviour; settings land in settings.json and survive a reload;
 // the pet's own row (Puff's 蓬起毛) is there. Exit code 1 when a check fails.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { launch, sleep, themeTouches } from './perf-lib.mjs'
 
 const args = process.argv.slice(2)
@@ -22,6 +25,7 @@ const opt = (name) => {
 const THEME = opt('theme') ?? 'cotton-sky'
 const PET = opt('pet') ?? 'puff'
 const OWN_ROW = opt('own-row') ?? 'puffUp'
+const PROJECTS_ONLY = args.includes('--projects-only')
 const SHOTS = opt('shots') ? path.resolve(opt('shots')) : null
 const WORK = path.join(process.env.ORCA_PERF_TEMP || os.tmpdir(), `orca-live-check-${process.pid}`)
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
@@ -48,6 +52,80 @@ const pickerOpen = () => ev(`!!document.getElementById('orca-themer-picker')`)
 const petCenter = () =>
   ev(`(() => { const p = [...__orcaThemer.companions.values()].find(p => p.id === ${JSON.stringify(PET)}) ?? [...__orcaThemer.companions.values()][0]; const r = p.root.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 } })()`)
 const settle = () => sleep(450)
+const SKIP_REST = Symbol('projects only')
+
+// ---- a tab of another project: Orca keeps every visited worktree's tabs mounted but lays out only the
+// one in front, so the pet has to knock on that project's sidebar row and switch project on click.
+const otherProject = async () => {
+  for (const name of ['proj-a', 'proj-b']) {
+    const dir = path.join(WORK, name)
+    fs.mkdirSync(dir, { recursive: true })
+    const git = (...a) => execFileSync('git', ['-c', 'user.name=live-check', '-c', 'user.email=live-check@example.invalid', ...a], { cwd: dir, stdio: 'ignore' })
+    git('init', '-q')
+    fs.writeFileSync(path.join(dir, 'README.md'), `# ${name}\n`)
+    git('add', 'README.md')
+    git('commit', '-q', '-m', 'init')
+  }
+  const two = JSON.parse(
+    await inst.eval(
+      `(async () => {
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms))
+        const u = [...document.querySelectorAll('script[src],link[href]')].map((e) => e.src || e.href).find((s) => s.includes('/store-'))
+        const mod = await import(u)
+        const st = Object.values(mod).find((v) => typeof v?.getState === 'function' && typeof v.getState().setActiveWorktree === 'function')
+        window.__lcStore = st
+        const find = (n) => st.getState().allWorktrees().find((w) => w.path.replace(/\\\\/g, '/').endsWith('/' + n))
+        for (const p of ${JSON.stringify([path.join(WORK, 'proj-a'), path.join(WORK, 'proj-b')])}) await st.getState().addRepoPath(p)
+        for (let i = 0; i < 40 && !(find('proj-a') && find('proj-b')); i++) await wait(500)
+        const a = find('proj-a')?.id, b = find('proj-b')?.id
+        if (!a || !b) return JSON.stringify({ error: 'no worktrees' })
+        const tabIn = async (wt) => {
+          st.getState().setActiveWorktree(wt)
+          await wait(2500)
+          if (!(st.getState().tabsByWorktree[wt] ?? []).length) (st.getState().openNewTerminalTabInActiveWorkspace(), await wait(3000))
+          return (st.getState().tabsByWorktree[wt] ?? [])[0]?.id ?? null
+        }
+        const tb = await tabIn(b)
+        const ta = await tabIn(a)
+        return JSON.stringify({ a, b, ta, tb })
+      })()`,
+      90000
+    )
+  )
+  const sel = (id) => `document.querySelector('[data-testid="sortable-tab"][data-tab-id="${id}"]')`
+  const laidOut = (id) => ev(`(${sel(id)}?.getBoundingClientRect().width ?? 0) > 0`)
+  check("two projects, the other one's tab mounted but not laid out", two.ta && two.tb && (await ev(`!!${sel(two.tb)}`)) && !(await laidOut(two.tb)) && (await laidOut(two.ta)), JSON.stringify(two))
+  check('the tab in front is the one laid out', await ev(`__orcaThemer.companionRules.frontTab()?.getAttribute('data-tab-id') === ${JSON.stringify(two.ta)}`))
+  // The other project's agent asks for permission (the attribute Orca sets on its tab).
+  await ev(`(${sel(two.tb)}.setAttribute('data-agent-activity-status', 'permission'), true)`)
+  const ok = (n) => n && n.dx !== undefined && Math.abs(n.dx) < 48 && n.dy > -12 && n.dy < 64 && !n.front
+  let near = null
+  for (let i = 0; i < 20 && !ok(near); i++) {
+    await sleep(500)
+    near = await ev(`(() => {
+      const st = window.__lcStore.getState(), wt = ${JSON.stringify(two.b)}
+      const rows = [...document.querySelectorAll('[id^="worktree-list-option-"]')].filter((e) => e.getBoundingClientRect().width > 0)
+      const dec = (e) => { try { return decodeURIComponent(e.id) } catch { return e.id } }
+      const row = rows.find((e) => dec(e).includes(wt)) ?? rows.find((e) => e.getAttribute('data-repo-header-id') === wt.split('::')[0])
+      const p = [...__orcaThemer.companions.values()][0].root.getBoundingClientRect()
+      const r = row?.getBoundingClientRect()
+      return r ? { dx: Math.round(p.left + p.width / 2 - (r.left + r.width / 2)), dy: Math.round(p.top - r.bottom), front: st.activeWorktreeId === wt } : { error: 'no row' }
+    })()`)
+  }
+  await shot('50-knock-other-project')
+  check("it knocks on the other project's sidebar row", ok(near), JSON.stringify(near))
+  const c = await petCenter()
+  await mouse([{ type: 'mouseMoved', x: c.x, y: c.y }, { type: 'mousePressed', x: c.x, y: c.y, button: 'left', buttons: 1, clickCount: 1 }, { type: 'mouseReleased', x: c.x, y: c.y, button: 'left', clickCount: 1 }])
+  let went = false
+  for (let i = 0; i < 12 && !went; i++) {
+    await sleep(500)
+    went = await ev(`window.__lcStore.getState().activeWorktreeId === ${JSON.stringify(two.b)} && (${sel(two.tb)}?.getBoundingClientRect().width ?? 0) > 0 && ${sel(two.tb)}.dataset.active === 'true'`)
+  }
+  await shot('51-switched-project')
+  check('a click on it switches to that project and opens the tab', went)
+  await ev(`(${sel(two.tb)}?.removeAttribute('data-agent-activity-status'), true)`)
+  await sleep(2500) // it flies home
+}
 
 try {
   await sleep(3000)
@@ -57,6 +135,8 @@ try {
   const errors = () => ev(`__lc.filter(m => !m.includes('[terminal]'))`) // Orca's own terminal warnings are not ours
   check('the pet is on screen', await ev(`!!document.querySelector('[data-orca-themer-companion], #orca-themer-companion-${PET}') || [...__orcaThemer.companions.values()].some(p => p.root?.isConnected)`))
   await shot('00-start')
+  await otherProject()
+  if (PROJECTS_ONLY) throw SKIP_REST
 
   // ---- picker -> 寵物設定
   await ctrlAltT()
@@ -231,7 +311,8 @@ try {
   await closeByShortcut()
   check('no page errors in the whole run', (await errors()).length === 0, (await errors()).slice(0, 3).join(' | '))
 } catch (error) {
-  check('the run finished', false, error.stack?.split('\n').slice(0, 3).join(' '))
+  if (error === SKIP_REST) check('no page errors', (await ev(`__lc.filter(m => !m.includes('[terminal]'))`)).length === 0)
+  else check('the run finished', false, error.stack?.split('\n').slice(0, 3).join(' '))
 } finally {
   await inst.stop()
   if (!args.includes('--keep-work')) fs.rmSync(WORK, { recursive: true, force: true })
