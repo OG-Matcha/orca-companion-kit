@@ -171,12 +171,30 @@
     return [...all].find(shown) ?? all[0] ?? null
   }
   // Orca's own store (zustand): which worktree a tab belongs to, and bringing that worktree to the front.
-  // Found by shape, not by its minified export name; null when this Orca build has none.
+  // Found by shape, not by its minified export name; null when this Orca build has none. Only Orca's own
+  // bundle is imported: a modulepreload of assets/store-<8-char hash>.js next to the page (Orca loads from
+  // file://, whose origin is opaque, so the check is the page's own assets folder and protocol).
   let orcaStore = null
   let storeLoad = null
+  const STORE_FILE = /^store-[\w-]{8}\.js$/
+  const storeUrl = () => {
+    const assets = new URL('assets/', location.href)
+    for (const el of document.querySelectorAll('link[rel="modulepreload"][href]')) {
+      let u
+      try {
+        u = new URL(el.getAttribute('href'), location.href)
+      } catch {
+        continue
+      }
+      if (u.protocol !== location.protocol || u.origin !== assets.origin || u.search || u.hash) continue
+      const name = u.pathname.slice(assets.pathname.length)
+      if (u.pathname.startsWith(assets.pathname) && STORE_FILE.test(name)) return u.href
+    }
+    return null
+  }
   const loadStore = () =>
     (storeLoad ??= (async () => {
-      const u = [...document.querySelectorAll('script[src],link[href]')].map((e) => e.src || e.href).find((s) => s.includes('/store-'))
+      const u = storeUrl()
       if (!u) return null
       const mod = await import(u)
       orcaStore = Object.values(mod).find((v) => typeof v?.getState === 'function' && typeof v.getState().setActiveWorktree === 'function') ?? null

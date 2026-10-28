@@ -70,7 +70,8 @@ const otherProject = async () => {
     await inst.eval(
       `(async () => {
         const wait = (ms) => new Promise((r) => setTimeout(r, ms))
-        const u = [...document.querySelectorAll('script[src],link[href]')].map((e) => e.src || e.href).find((s) => s.includes('/store-'))
+        const assets = new URL('assets/', location.href).href
+        const u = [...document.querySelectorAll('link[rel="modulepreload"][href]')].map((e) => e.href).find((s) => s.startsWith(assets) && /^store-[\\w-]{8}\\.js$/.test(s.slice(assets.length)))
         const mod = await import(u)
         const st = Object.values(mod).find((v) => typeof v?.getState === 'function' && typeof v.getState().setActiveWorktree === 'function')
         window.__lcStore = st
