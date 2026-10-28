@@ -539,7 +539,7 @@
     // ---------- the element ----------
     const home = document.createElement('div')
     home.dataset.companion = id
-    home.title = cfg.title ?? cfg.label ?? id
+    home.setAttribute('aria-label', cfg.title ?? cfg.label ?? id) // not title: a native tooltip would cover the pet on hover
     home.style.cssText = `position:absolute;left:0;top:0;width:${BOX}px;height:${BOX}px;pointer-events:auto;cursor:pointer;touch-action:none;will-change:transform`
     const glowColor = cfg.glow === false ? null : cfg.glow ?? 'color-mix(in srgb, var(--primary, #c8d2ff) 55%, transparent)'
     const glow = document.createElement('div')
