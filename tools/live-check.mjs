@@ -5,13 +5,17 @@
 //   node tools/live-check.mjs --shots DIR       also save screenshots of each step into DIR
 //   node tools/live-check.mjs --keep-work       keep the temp folder (settings.json, user data)
 //   node tools/live-check.mjs --projects-only   only the two-project check below
+//   node tools/live-check.mjs --emotion-only    only the feelings checks below
 //
 // Checks: with two projects, a tab of the one not in front that waits for permission gets a knock on that
 // project's sidebar row, and a click on the pet switches project and opens the tab; then the first project
 // is put back in front and the pet waited for until it is home and idle. Then: the picker opens 「寵物設定」; right-click on the pet opens it; ✕, a click outside and Ctrl+Alt+T
 // close it; Esc closes neither it nor the picker; every tab renders; every 「試試看」 plays with no page
 // error; a switch that is off stops the behaviour; settings land in settings.json and survive a reload;
-// the pet's own row (Puff's 蓬起毛) is there. Exit code 1 when a check fails.
+// the pet's own row (Puff's 蓬起毛) is there. Feelings: the 心情 tab comes first and renders, holding Alt
+// shows its numbers, an agent tab that fails lowers the mood (each failure counted, even back to back)
+// and not the affection, the sulk happens once a day, three pats make up, and its switch turns it off.
+// Exit code 1 when a check fails.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -27,6 +31,7 @@ const THEME = opt('theme') ?? 'cotton-sky'
 const PET = opt('pet') ?? 'puff'
 const OWN_ROW = opt('own-row') ?? 'puffUp'
 const PROJECTS_ONLY = args.includes('--projects-only')
+const EMOTION_ONLY = args.includes('--emotion-only')
 const SHOTS = opt('shots') ? path.resolve(opt('shots')) : null
 const WORK = path.join(process.env.ORCA_PERF_TEMP || os.tmpdir(), `orca-live-check-${process.pid}`)
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true })
@@ -174,6 +179,122 @@ const otherProject = async () => {
 // one): the pet says nothing and starts nothing while the page is hidden, and that is not what is checked.
 const focusEmulation = () => inst.cdp('Emulation.setFocusEmulationEnabled', { enabled: true }).catch(() => {})
 
+// ---- feelings (src/touches/companion_emotion.js): the 心情 tab, Alt, a failure, the sulk and making up.
+const emotionChecks = async () => {
+  const P = `[...__orcaThemer.companions.values()].find(p => p.id === ${JSON.stringify(PET)})`
+  const emo = (expr) => ev(`(() => { const e = ${P}.emotion; return ${expr} })()`)
+  const view = () => emo(`(({ mood, aff, anx, target, moodlets }) => ({ mood, aff, anx, target, kinds: moodlets.map(m => m.kind + 'x' + m.count) }))(e.view())`)
+  const sulking = () => ev(`!!${P}.emotion.sulking`)
+  const waitUntil = async (fn, ms) => {
+    for (let t = 0; t < ms; t += 250) {
+      if (await fn()) return true
+      await sleep(250)
+    }
+    return false
+  }
+  const openPanel = async () => {
+    const c = await petCenter()
+    await mouse([{ type: 'mouseMoved', x: c.x, y: c.y }, { type: 'mousePressed', x: c.x, y: c.y, button: 'right', buttons: 2, clickCount: 1 }, { type: 'mouseReleased', x: c.x, y: c.y, button: 'right', clickCount: 1 }])
+    await settle()
+  }
+  const closePanel = async () => {
+    if (await settingsOpen()) await ctrlAltT()
+    await sleep(700)
+  }
+  const setSulkSwitch = async (want) => {
+    await openPanel()
+    await ev(`(() => { const s = document.querySelector('#oc-settings [data-row="sulk"] .ocs-switch'); if ((s.getAttribute('aria-checked') === 'true') !== ${want}) s.click() })()`)
+    await settle()
+    await closePanel()
+  }
+  check('the pet has feelings', await ev(`!!${P}?.emotion?.view()`))
+  // A calm, known state to start from (an isolated Orca: nothing of yours is touched), and no tab remembered.
+  await ev(`(Object.keys(localStorage).filter(k => k.startsWith('ocs-') || k.includes('settings-tab')).forEach(k => localStorage.removeItem(k)), true)`)
+  await emo(`(e.set({ mood: 60, anx: 0, lone: 0, sulkedToday: false }), true)`)
+
+  // The 心情 tab: first, words shown and numbers hidden.
+  await openPanel()
+  const first = await ev(`(() => { const t = document.querySelector('#oc-settings .ocs-tab'); return t ? { tab: t.dataset.tab, selected: t.getAttribute('aria-selected') } : null })()`)
+  check('the 心情 tab comes first', first?.tab === 'heart', JSON.stringify(first))
+  await ev(`(document.querySelector('#oc-settings .ocs-tab[data-tab="heart"]').click(), true)`)
+  await settle()
+  const heart = await ev(`(() => { const r = document.querySelector('#oc-settings [data-row="heart"]'); if (!r) return null; const alt = r.querySelector('.ocs-alt'); return { mood: r.querySelector('.ocs-hmood')?.textContent, tier: r.querySelector('.ocs-hv')?.textContent, hearts: r.querySelector('.ocs-hearts')?.textContent.length, altShown: !!alt && getComputedStyle(alt).display !== 'none', sulkRow: !!document.querySelector('#oc-settings [data-row="sulk"] .ocs-switch') } })()`)
+  check('the 心情 tab shows words, hearts and the 鬧彆扭 switch, numbers hidden', heart && heart.mood && heart.mood !== '—' && heart.tier && heart.hearts === 5 && !heart.altShown && heart.sulkRow, JSON.stringify(heart))
+  await shot('60-heart-tab')
+  // Holding Alt shows the numbers; letting go hides them again.
+  await inst.cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Alt', code: 'AltLeft', windowsVirtualKeyCode: 18, modifiers: 1 })
+  await sleep(300)
+  const held = await ev(`(() => { const a = document.querySelector('#oc-settings [data-row="heart"] .ocs-alt'); return { shown: !!a && getComputedStyle(a).display !== 'none', text: a?.textContent } })()`)
+  await shot('61-heart-alt')
+  await inst.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Alt', code: 'AltLeft', windowsVirtualKeyCode: 18 })
+  await sleep(300)
+  const released = await ev(`getComputedStyle(document.querySelector('#oc-settings [data-row="heart"] .ocs-alt')).display`)
+  check('holding Alt shows the numbers, letting go hides them', held.shown && /\d/.test(held.text ?? '') && released === 'none', `${held.text}; after: ${released}`)
+  check('Alt does not close the panel', await settingsOpen())
+
+  // An agent tab fails twice in a row (the attribute Orca sets on its tab; a stand-in tab, so no real one
+  // changes): both count, before any reaction cooldown; anxiety and the mood's pull go one way, affection stays.
+  await ev(`(() => { const t = document.createElement('div'); t.dataset.testid = 'sortable-tab'; t.dataset.tabId = 'live-check-emotion'; t.style.display = 'none'; document.body.appendChild(t); return true })()`)
+  const tabSel = `document.querySelector('[data-tab-id="live-check-emotion"]')`
+  await sleep(3500) // the 3 s status poll sees it with no status yet
+  const before = await view()
+  for (let i = 0; i < 2; i++) {
+    await ev(`(${tabSel}.setAttribute('data-agent-activity-status', 'working'), true)`)
+    await sleep(400)
+    await ev(`(${tabSel}.setAttribute('data-agent-activity-status', 'failed'), true)`)
+    await sleep(600)
+  }
+  await emo(`(e.tick(), true)`)
+  const after = await view()
+  await sleep(5300) // the panel repaints every 5 s
+  const listed = await ev(`[...document.querySelectorAll('#oc-settings [data-row="heart"] .ocs-hlist li')].map(li => (li.dataset.kind ?? '') + ' ' + li.textContent)`)
+  await shot('62-heart-after-failure')
+  check(
+    'two agent failures both count: anxiety up, mood falling toward a lower target, affection unchanged',
+    after.kinds.includes('agentFailx2') && after.anx > before.anx + 10 && after.target < before.target - 5 && after.mood < before.mood && Math.abs(after.aff - before.aff) < 0.001,
+    `anx ${before.anx.toFixed(1)}→${after.anx.toFixed(1)}, target ${before.target.toFixed(1)}→${after.target.toFixed(1)}, mood ${before.mood.toFixed(2)}→${after.mood.toFixed(2)}, aff ${before.aff}→${after.aff}, ${after.kinds.join(',')}`
+  )
+  check('the panel lists the failure', listed.some((t) => t.startsWith('agentFail')), listed.slice(0, 3).join(' | '))
+  await ev(`(${tabSel}?.remove(), true)`)
+  await closePanel()
+  await sleep(4000) // the droop and its line play out
+
+  // The sulk: mood under 20 sends it to a corner; three real pats (back and forth over it) win it back.
+  const homeAt = await petCenter()
+  await emo(`(e.set({ mood: 10, anx: 0, lone: 0, sulkedToday: false }), e.tick(), true)`)
+  const sulked = await waitUntil(sulking, 6000)
+  await sleep(2600) // it flies to the corner and turns away
+  const corner = await petCenter()
+  await shot('63-sulk')
+  check('mood under 20: it sulks in a corner', sulked && Math.hypot(corner.x - homeAt.x, corner.y - homeAt.y) > 20, `from ${Math.round(homeAt.x)},${Math.round(homeAt.y)} to ${Math.round(corner.x)},${Math.round(corner.y)}`)
+  const pats = []
+  for (let i = 0; i < 8 && (await sulking()); i++) {
+    const p = await petCenter()
+    const hit = await ev(`(() => { const e = document.elementFromPoint(${p.x}, ${p.y}); return e?.closest('[data-companion]') ? 'pet' : (e?.tagName ?? 'none') + '.' + String(e?.className?.baseVal ?? e?.className ?? '').slice(0, 40) })()`)
+    const steps = [{ type: 'mouseMoved', x: p.x, y: p.y, wait: 80 }]
+    for (let j = 0; j < 12; j++) steps.push({ type: 'mouseMoved', x: p.x + (j % 2 ? 14 : -14), y: p.y, wait: 50 })
+    await mouse(steps)
+    await sleep(300)
+    pats.push(`${await ev(`${P}.emotion.sulking?.pets ?? 'made up'`)}${hit === 'pet' ? '' : `(${hit})`}`)
+    await sleep(2400) // one pat per 2.5 s
+  }
+  await mouse([{ type: 'mouseMoved', x: 5, y: 5 }])
+  await shot('64-made-up')
+  const madeUp = await view()
+  check('three pats make up: the sulk ends and 被哄好了 is on its mind', !(await sulking()) && madeUp.kinds.some((k) => k.startsWith('comforted')) && pats.length >= 3, `pets ${pats.join(' → ')}; ${madeUp.kinds.join(',')}`)
+  await sleep(2500)
+  // Once a day at most.
+  await emo(`(e.set({ mood: 10 }), e.tick(), true)`)
+  check('a second sulk the same day does not happen', !(await waitUntil(sulking, 2000)))
+  // The switch: off, and a fresh day's sulk does not happen either.
+  await setSulkSwitch(false)
+  await emo(`(e.set({ mood: 10, sulkedToday: false }), e.tick(), true)`)
+  check('with 鬧彆扭 off, it does not sulk', !(await waitUntil(sulking, 2000)))
+  await setSulkSwitch(true)
+  await emo(`(e.set({ mood: 60, anx: 0, lone: 0, sulkedToday: false }), true)`)
+  await sleep(1500)
+}
+
 try {
   await focusEmulation()
   await sleep(3000)
@@ -183,8 +304,12 @@ try {
   const errors = () => ev(`__lc.filter(m => !m.includes('[terminal]'))`) // Orca's own terminal warnings are not ours
   check('the pet is on screen', await ev(`!!document.querySelector('[data-orca-themer-companion], #orca-themer-companion-${PET}') || [...__orcaThemer.companions.values()].some(p => p.root?.isConnected)`))
   await shot('00-start')
-  await otherProject()
+  if (!EMOTION_ONLY) await otherProject()
   if (PROJECTS_ONLY) throw SKIP_REST
+  await emotionChecks()
+  check('no page errors in the feelings checks', (await errors()).length === 0, (await errors()).slice(0, 3).join(' | '))
+  if (EMOTION_ONLY) throw SKIP_REST
+  await petFree(20000) // back home and idle before the panel checks
 
   // ---- picker -> 寵物設定
   await ctrlAltT()
