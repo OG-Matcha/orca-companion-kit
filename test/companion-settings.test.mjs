@@ -49,6 +49,16 @@ test('catalog: every built-in behaviour has a row; opt-in ones default to what t
   assert.equal(off.gaze, true)
 })
 
+test('catalog: a pet with feelings gets the 心情 tab first (its state and the sulk switch); `emotion: false` none', () => {
+  const feels = petOf({}, { emotion: true })
+  const sections = C.catalog(feels)
+  assert.equal(sections[0].id, 'heart')
+  assert.deepEqual(plain(sections[0].items.map((i) => [i.id, i.kind])), [['heart', 'heart'], ['sulk', 'feature']])
+  assert.equal(C.defaults(sections, feels).features.sulk, true)
+  assert.equal(C.normalize({ features: { sulk: false } }, C.defaults(sections, feels)).features.sulk, false)
+  assert.equal(section(C.catalog(petOf({ emotion: false }, { emotion: false })), 'heart'), undefined)
+})
+
 test('catalog: rows the pet cannot do are left out (no lines, no sounds, no song, no wander)', () => {
   const quiet = petOf({ acts: { wander: null } }, { speaks: false, sounds: false, glow: false, acts: new Set(['wiggle']) })
   const sections = C.catalog(quiet)

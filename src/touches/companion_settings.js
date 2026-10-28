@@ -107,6 +107,40 @@
 #${ROOT_ID} .ocs-stats{margin-top:4px;font-size:12px;color:var(--ocs-muted)}
 #${ROOT_ID} .ocs-stats b{margin:0 3px;font-weight:600;color:var(--ocs-fg);font-variant-numeric:tabular-nums}
 
+#${ROOT_ID} .ocs-heart{display:block;padding:6px 0 14px}
+#${ROOT_ID} .ocs-htop{display:flex;align-items:center;gap:14px;padding:10px 14px;border-radius:12px;background:color-mix(in srgb,var(--ocs-primary) 7%,transparent);border:1px solid var(--ocs-line)}
+#${ROOT_ID} .ocs-hglyph{flex:none;width:42px;height:42px;display:grid;place-items:center;border-radius:50%;font-size:20px;background:radial-gradient(closest-side,color-mix(in srgb,var(--ocs-primary) 30%,transparent),transparent)}
+#${ROOT_ID} .ocs-hk{font-size:11px;letter-spacing:.08em;color:var(--ocs-muted)}
+#${ROOT_ID} .ocs-hmood{font-size:17px;font-weight:600;letter-spacing:.04em}
+#${ROOT_ID} .ocs-spark{margin-left:auto;flex:none;width:132px;height:34px;overflow:visible}
+#${ROOT_ID} .ocs-spark polyline{fill:none;stroke:var(--ocs-primary);stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+#${ROOT_ID} .ocs-spark .ocs-sfill{fill:color-mix(in srgb,var(--ocs-primary) 14%,transparent);stroke:none}
+#${ROOT_ID} .ocs-spark .ocs-sdot{fill:var(--ocs-fg)}
+#${ROOT_ID} .ocs-spark text{font-size:9px;fill:var(--ocs-muted)}
+#${ROOT_ID} .ocs-hgrid{display:grid;grid-template-columns:3.2em 1fr;gap:10px 12px;align-items:center;margin:14px 2px 0}
+#${ROOT_ID} .ocs-hline{display:flex;align-items:center;gap:10px;min-width:0;flex-wrap:wrap}
+#${ROOT_ID} .ocs-hearts{font-size:15px;letter-spacing:.1em;color:#e8789f}
+#${ROOT_ID} .ocs-hearts span{color:color-mix(in srgb,#e8789f 30%,transparent)}
+#${ROOT_ID} .ocs-hv{font-size:13px;font-weight:500}
+#${ROOT_ID} .ocs-hnum{font-size:11.5px;color:var(--ocs-muted);font-variant-numeric:tabular-nums}
+#${ROOT_ID} .ocs-hbar{position:relative;width:132px;height:5px;border-radius:3px;background:color-mix(in srgb,var(--ocs-muted) 20%,transparent);overflow:hidden}
+#${ROOT_ID} .ocs-hbar i{position:absolute;left:0;top:0;bottom:0;border-radius:3px;background:var(--ocs-primary)}
+#${ROOT_ID} .ocs-htags{display:flex;flex-wrap:wrap;gap:8px;margin:12px 2px 0;min-height:22px}
+#${ROOT_ID} .ocs-htag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 9px;border-radius:999px;font-size:11.5px;color:color-mix(in srgb,#e0a64b 80%,var(--ocs-fg));background:color-mix(in srgb,#e0a64b 9%,transparent);border:1px solid color-mix(in srgb,#e0a64b 35%,transparent)}
+#${ROOT_ID} .ocs-htag.is-lone{color:color-mix(in srgb,var(--ocs-primary) 75%,var(--ocs-fg));background:color-mix(in srgb,var(--ocs-primary) 9%,transparent);border-color:color-mix(in srgb,var(--ocs-primary) 35%,transparent)}
+#${ROOT_ID} .ocs-htag.is-calm{color:var(--ocs-muted);background:none;border-color:transparent;padding:0}
+#${ROOT_ID} .ocs-hlist{list-style:none;margin:6px 0 0;padding:0;font-size:12.5px}
+#${ROOT_ID} .ocs-hlist li{display:flex;align-items:baseline;gap:8px;padding:4px 2px;border-top:1px solid var(--ocs-line)}
+#${ROOT_ID} .ocs-hlist li:first-child{border-top:0}
+#${ROOT_ID} .ocs-hlist li.is-empty{color:var(--ocs-muted);font-weight:400}
+#${ROOT_ID} .ocs-hsign{flex:none;width:1.2em;text-align:center;font-weight:600;color:#e8789f}
+#${ROOT_ID} .ocs-hlist li.is-neg .ocs-hsign{color:var(--ocs-muted)}
+#${ROOT_ID} .ocs-hname{flex:1;min-width:0}
+#${ROOT_ID} .ocs-hleft{font-size:11.5px;color:var(--ocs-muted);font-variant-numeric:tabular-nums}
+#${ROOT_ID} .ocs-hhint{margin-top:10px;font-size:11px;color:var(--ocs-muted);opacity:.75}
+#${ROOT_ID} .ocs-alt{display:none;font-size:11px;color:var(--ocs-muted);font-variant-numeric:tabular-nums}
+#${ROOT_ID}[data-alt] .ocs-alt{display:inline}
+
 #${ROOT_ID} .ocs-foot{display:flex;justify-content:space-between;gap:12px;padding:9px 18px 11px;border-top:1px solid var(--ocs-line);font-size:11.5px;color:var(--ocs-muted)}
 #${ROOT_ID} kbd{font:11px var(--font-mono,ui-monospace,monospace);border:1px solid var(--ocs-edge);border-bottom-width:2px;border-radius:4px;padding:0 5px}
 
@@ -448,6 +482,116 @@
     return row
   }
 
+  // ---------- how it feels right now (api.emotion.view(); companion_emotion.js) ----------
+  // Words, not numbers, for its mood, worry and loneliness (numbers show while Alt is held); affection as
+  // hearts and a tier, closeness as a stage with a bar; then what is on its mind, each with the time left.
+  const SVG_NS = 'http://www.w3.org/2000/svg'
+  const svgEl = (tag, attrs = {}) => {
+    const e = document.createElementNS(SVG_NS, tag)
+    for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v))
+    return e
+  }
+  const leftText = (min) => (min >= 60 ? `還有 ${Math.floor(min / 60)} 小時${min % 60 ? ` ${min % 60} 分` : ''}` : `還有 ${min} 分`)
+  const fmt = (v) => (Math.round(v * 10) / 10).toFixed(1)
+  function heartRow() {
+    const row = el('div', 'ocs-row ocs-heart')
+    row.dataset.row = 'heart'
+    const top = el('div', 'ocs-htop')
+    const glyph = el('div', 'ocs-hglyph')
+    glyph.setAttribute('aria-hidden', 'true')
+    const moodBox = el('div')
+    const moodV = el('div', 'ocs-hmood', '—')
+    const moodAlt = el('span', 'ocs-alt')
+    moodBox.append(el('div', 'ocs-hk', '現在'), moodV, moodAlt)
+    const spark = svgEl('svg', { class: 'ocs-spark', viewBox: '0 0 132 34', role: 'img', 'aria-label': '近 24 小時的心情' })
+    const sFill = svgEl('path', { class: 'ocs-sfill', d: '' })
+    const sLine = svgEl('polyline', { points: '' })
+    const sDot = svgEl('circle', { class: 'ocs-sdot', r: 2, cx: 0, cy: 0 })
+    const sText = svgEl('text', { x: 132, y: 33, 'text-anchor': 'end' })
+    sText.textContent = '近 24 小時'
+    spark.append(sFill, sLine, sDot, sText)
+    top.append(glyph, moodBox, spark)
+    const grid = el('div', 'ocs-hgrid')
+    const affLine = el('div', 'ocs-hline')
+    const hearts = el('span', 'ocs-hearts')
+    hearts.setAttribute('aria-hidden', 'true')
+    const affV = el('span', 'ocs-hv', '—')
+    const affN = el('span', 'ocs-hnum')
+    affLine.append(hearts, affV, affN)
+    const closeLine = el('div', 'ocs-hline')
+    const bar = el('span', 'ocs-hbar')
+    const fill = el('i')
+    bar.append(fill)
+    const closeV = el('span', 'ocs-hv', '—')
+    const closeN = el('span', 'ocs-hnum')
+    const closeNext = el('span', 'ocs-hnum')
+    closeLine.append(bar, closeV, closeN, closeNext)
+    grid.append(el('span', 'ocs-hk', '好感'), affLine, el('span', 'ocs-hk', '親密'), closeLine)
+    const tags = el('div', 'ocs-htags')
+    const mindK = el('div', 'ocs-hk', '牠在想的事')
+    mindK.style.marginTop = '14px'
+    const list = el('ul', 'ocs-hlist')
+    const hint = el('div', 'ocs-hhint', '按住 Alt 可以看數字。')
+    row.append(top, grid, tags, mindK, list, hint)
+    const paint = () => {
+      const v = pet()?.emotion?.view()
+      if (!v) return
+      const W = v.words
+      glyph.textContent = v.moodGlyph
+      moodV.textContent = v.moodWord
+      moodAlt.textContent = `心情 ${fmt(v.mood)}，正往 ${fmt(v.target)} 走`
+      // The sparkline: 48 points over 24 hours, the newest at the right; fewer points start further right.
+      const pts = [...v.history.map(([, m]) => m), Math.round(v.mood)].slice(-49)
+      const step = 132 / 48
+      const xy = pts.map((m, i) => [132 - (pts.length - 1 - i) * step, 2 + (1 - m / 100) * 22])
+      sLine.setAttribute('points', xy.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' '))
+      sFill.setAttribute('d', xy.length > 1 ? `M${xy[0][0].toFixed(1)},26 ${xy.map(([x, y]) => `L${x.toFixed(1)},${y.toFixed(1)}`).join(' ')} L132,26Z` : '')
+      sDot.setAttribute('cx', xy.at(-1)[0].toFixed(1))
+      sDot.setAttribute('cy', xy.at(-1)[1].toFixed(1))
+      hearts.replaceChildren(...Array.from({ length: 5 }, (_, i) => (i < v.hearts ? document.createTextNode('♥') : el('span', null, '♥'))))
+      affV.textContent = v.tierName
+      affN.textContent = `${fmt(v.aff)} / 100`
+      fill.style.width = `${v.close}%`
+      closeV.textContent = v.stageName
+      closeN.textContent = `${fmt(v.close)} / 100`
+      closeNext.textContent = v.nextStage ? `下一階：${v.nextStage[1]}` : ''
+      const tagList = []
+      if (v.anxWord) tagList.push(['!', v.anxWord, v.anx, ''])
+      if (v.loneWord) tagList.push(['…', v.loneWord, v.lone, 'is-lone'])
+      else if (v.awayDays >= 1) tagList.push(['…', W.missed, v.lone, 'is-lone'])
+      tags.replaceChildren(
+        ...(tagList.length
+          ? tagList.map(([g, word, n, cls]) => {
+              const tg = el('span', `ocs-htag ${cls}`)
+              tg.dataset.tag = cls ? 'lone' : 'anx'
+              tg.append(`${g} ${word}`, el('span', 'ocs-alt', fmt(n)))
+              return tg
+            })
+          : [el('span', 'ocs-htag is-calm', v.mood >= 50 ? W.calm : W.tired)])
+      )
+      const items = v.moodlets.slice(0, 6)
+      list.replaceChildren(
+        ...(items.length
+          ? items.map((m) => {
+              const li = el('li', m.v < 0 ? 'is-neg' : '')
+              li.dataset.kind = m.kind
+              li.append(
+                el('span', 'ocs-hsign', m.v < 0 ? '－' : '＋'),
+                el('span', 'ocs-hname', m.count > 1 ? `${m.label} ×${m.count}` : m.label),
+                el('span', 'ocs-alt', `${m.v > 0 ? '+' : ''}${m.v}`),
+                el('span', 'ocs-hleft', leftText(m.leftMin))
+              )
+              return li
+            })
+          : [el('li', 'is-empty', W.nothing)])
+      )
+    }
+    updaters.push(paint)
+    // While this page is open, the clocks on its thoughts tick down.
+    const timer = setInterval(() => (row.isConnected ? paint() : clearInterval(timer)), 5000)
+    return row
+  }
+
   // A button that asks once more, in place, before doing something that cannot be undone.
   function confirmRow(item, { button, question, yes, done, run }) {
     const { row, side } = baseRow(item)
@@ -490,11 +634,12 @@
   const resetAllRow = (item) =>
     confirmRow(item, { button: '恢復預設…', question: '全部設定都回到預設？', yes: '恢復', done: '設定都回到預設了。', run: () => base() && save(C.normalize({ you: cfg()?.you }, base())) })
 
-  const ROWS = { feature: featureRow, freq: freqRow, number: numberRow, range: rangeRow, quiet: quietRow, name: nameRow, size: sizeRow, home: homeRow, stats: statsRow, forget: forgetRow, resetAll: resetAllRow }
+  const ROWS = { heart: heartRow, feature: featureRow, freq: freqRow, number: numberRow, range: rangeRow, quiet: quietRow, name: nameRow, size: sizeRow, home: homeRow, stats: statsRow, forget: forgetRow, resetAll: resetAllRow }
 
   // ---------- the panel ----------
   let previous = null
   let tabIndex = 0
+  let altOff = null
   const TAB_KEY = 'orca-companion:settings-tab'
   // Rows a pet hid with `behaviors: [{ id, hidden: true }]` keep their default but are not drawn.
   const sections = () => (pet()?.panel.sections ?? []).map((s) => ({ ...s, items: s.items.filter((i) => !i.hidden) })).filter((s) => s.items.length)
@@ -662,8 +807,17 @@
           items[e.shiftKey ? items.length - 1 : 0].focus()
         }
       }
+      // Alt held: the 心情 tab shows its numbers; released (or the window loses focus), words only.
+      if (e.key === 'Alt') {
+        e.preventDefault()
+        root.dataset.alt = ''
+      }
       e.stopPropagation()
     })
+    const altUp = (e) => root && (e.type === 'blur' || e.key === 'Alt') && delete root.dataset.alt
+    root.addEventListener('keyup', altUp)
+    addEventListener('blur', altUp)
+    altOff = () => removeEventListener('blur', altUp)
     root.addEventListener('focusout', (e) => {
       if (root && e.relatedTarget && !root.contains(e.relatedTarget)) tabs[tabIndex]?.focus()
     })
@@ -695,6 +849,8 @@
     root = null
     savedFlash = null
     updaters = []
+    altOff?.()
+    altOff = null
     removeEventListener('orca-themer:state', onState)
     T.setOverlay?.(null)
     r.dataset.closing = ''
