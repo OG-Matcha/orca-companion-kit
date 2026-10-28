@@ -61,3 +61,9 @@ test('lint: terminal palettes need #hex colors', () => {
   assert.equal(lintTerminal('{"background":"red"}').some((i) => i.rule === 'terminal-color'), true)
   assert.equal(lintTerminal('nope')[0].rule, 'json')
 })
+
+test('lint: a touch that registers nothing is flagged, a shared module that sets T.<name> is not', () => {
+  const rule = (code) => lintTouch(code, 'x.js').map((i) => i.rule)
+  assert.ok(rule(';(() => { const x = 1 })()').includes('no-register'))
+  assert.ok(!rule(';(() => {\n  const T = window.__orcaThemer\n  T.myModel = { a: 1 }\n})()').includes('no-register'))
+})
