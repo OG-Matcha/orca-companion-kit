@@ -33,7 +33,7 @@ Test-Path "$HOME\.orca\themer"   # exists after the first launch through the kit
 | --- | --- | --- |
 | `themes/<id>.css` | 檔頭（`@name`、`@description`、`@touches`），`html.dark { … }` 變數，游標規則 | [themes.md](themes.md)、`examples/themes/cotton-sky.css` |
 | `terminal/<id>.json` | 終端機 16 色加背景、前景、游標、選取 | [themes.md#終端機配色](themes.md) |
-| `touches/<pet>.js` | `registerCompanion({...})`：SVG、parts、lines、words、acts | [companion-api.md](companion-api.md)、`examples/touches/puff.js` |
+| `touches/<pet>.js` | `registerCompanion({...})`：SVG、parts、lines（含心情台詞 low、lonely、sulk、consoled……）、words、acts、emotion.words | [companion-api.md](companion-api.md)、`examples/touches/puff.js` |
 | `sounds/<id>.wav`（選用） | `npm run chime -- …` 產生 | [themes.md#音效](themes.md) |
 
 主題的 `@touches` 要列出用到的 touch：`power-mode, <pet id>, custom-cursor`（有音效再加 `theme-sound`）。
