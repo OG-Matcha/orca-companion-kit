@@ -51,6 +51,10 @@ test('lint: touch rules (syntax, Esc, IME, readback, cleanup)', () => {
   const rules = lintTouch('T.registerTouch("x",{start(){addEventListener("keydown",f);setInterval(f,9);c.getImageData(0,0,1,1)}})').map((i) => i.rule)
   for (const rule of ['ime', 'cleanup', 'canvas-readback']) assert.ok(rules.includes(rule), rule)
   assert.equal(lintTouch('// Escape is mentioned only in a comment\nT.registerTouch("x",{start(){}})').length, 0)
+  // Typing is heard on the window or the document; a panel's own arrow keys are not typing.
+  assert.ok(lintTouch('T.registerTouch("x",{start(){document.addEventListener("keydown",f);return()=>document.removeEventListener("keydown",f)}})').some((i) => i.rule === 'ime'))
+  assert.ok(lintTouch('T.registerTouch("x",{start(){window.addEventListener("keydown",f);return()=>window.removeEventListener("keydown",f)}})').some((i) => i.rule === 'ime'))
+  assert.deepEqual(lintTouch('T.registerPickerItem({id:"p",run(){const nav=document.createElement("div");nav.addEventListener("keydown",f);nav.removeEventListener("keydown",f)}})'), [])
 })
 
 test('lint: terminal palettes need #hex colors', () => {

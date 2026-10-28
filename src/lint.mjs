@@ -45,7 +45,7 @@ export function lintTouch(source, filename = 'touch.js') {
     const m = re.exec(code)
     if (m) issues.push({ level, line: lineOf(code, m.index), rule, message })
   }
-  if (!/registerTouch|registerCompanion|registerAttrTouch/.test(code))
+  if (!/registerTouch|registerCompanion|registerAttrTouch|registerPickerItem/.test(code))
     issues.push({ level: 'warn', line: 1, rule: 'no-register', message: 'registers nothing (call window.__orcaThemer.registerTouch or registerCompanion)' })
   // Esc interrupts Claude Code and other agents in the terminal; a touch must never take it.
   find(/['"`]Escape['"`]|['"`]Esc['"`]|keyCode\s*===?\s*27|which\s*===?\s*27/, 'error', 'esc-binding', 'binds Esc (it interrupts Claude Code in the terminal; use right-click or a click instead)')
@@ -55,7 +55,9 @@ export function lintTouch(source, filename = 'touch.js') {
   // A canvas the size of the window is re-composited whole every frame something moves on it.
   if (/createElement\(\s*['"`]canvas['"`]\s*\)/.test(code) && /(width|w)\s*=\s*innerWidth|inset\s*:\s*0|100vw/.test(code))
     issues.push({ level: 'warn', line: 1, rule: 'full-window-canvas', message: 'looks like a full-window canvas; use a small canvas that moves to where the effect is (see power-mode.js)' })
-  if (/addEventListener\(\s*['"`]keydown/.test(code) && !/compositionupdate|compositionend/.test(code))
+  // Typing is heard on the window or the document; a keydown on an element of your own (a panel's arrow
+  // keys) is not typing.
+  if (/(?:^|[^.\w$]|(?:window|document|globalThis)\.)addEventListener\(\s*['"`]keydown/m.test(code) && !/compositionupdate|compositionend/.test(code))
     issues.push({ level: 'warn', line: 1, rule: 'ime', message: 'listens to keydown only: Windows IMEs send keydown for the first composing key only; also listen to compositionupdate/compositionend' })
   if (/setInterval\(/.test(code) && !/clearInterval\(/.test(code))
     issues.push({ level: 'warn', line: 1, rule: 'cleanup', message: 'setInterval without clearInterval: clear every timer in the stop function' })
