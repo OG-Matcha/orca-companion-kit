@@ -15,7 +15,8 @@
     "chime": "node tools/make-chime.mjs",
     "guard": "node tools/guard.mjs",
     "test": "node --test \"test/*.test.mjs\"",
-    "perf": "node tools/perf.mjs"
+    "perf": "node tools/perf.mjs",
+    "live-check": "node tools/live-check.mjs"
   },
   "dependencies": {
     "@electron/asar": "3.2.17"
