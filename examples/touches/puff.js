@@ -175,7 +175,34 @@
         evening: ['晚上好。'],
         night: ['這麼晚還在呀……']
       },
-      milestone: ['這是我們一起的第 {n} 天！']
+      milestone: ['這是我們一起的第 {n} 天！'],
+      // Its feelings (the 心情 tab): low spirits, lonely, the first low of the day, a sulk and being won
+      // back, too many failures in a row, and a tier closer ({tier}) or further apart.
+      low: ['……今天的毛有點扁扁的。', '咩……沒什麼力氣。', '雲好像變灰了。'],
+      lonely: ['好安靜喔……', '你在忙嗎？我在這裡。', '偶爾也摸摸我嘛。', '我數到第兩百朵雲了。'],
+      lowFirst: ['……今天有點累。', '咩……我沒事，只是有一點點悶。'],
+      sulk: ['……哼。', '……不想說話。', '……讓我自己待一下。'],
+      consoled: ['……咩。好多了。', '被你摸摸，毛又蓬起來了。', '……嗯，不氣了。'],
+      anxious: ['一直出錯……先喝口水好不好？', '休息五分鐘吧，錯誤不會跑掉的。', '深呼吸，我陪你一起看。'],
+      tierUp: ['咩！我們好像變成「{tier}」了。', '跟你在一起，越來越自在了。', '我最喜歡的位置，就是你旁邊。'],
+      tierDown: ['……最近，是不是有點遠了？', '你最近都沒什麼理我……']
+    },
+    // Words the 心情 tab uses for Puff (thresholds stay the engine's; see docs/companion-api.md「心情」).
+    emotion: {
+      words: {
+        tiers: ['怕生', '認得你', '信任你', '黏著你', '最要好'],
+        stages: [
+          [75, '一整片草原'],
+          [50, '一小片草地'],
+          [25, '一叢草'],
+          [10, '冒芽'],
+          [0, '草籽']
+        ],
+        moodlets: { pet: '被摸毛了', played: '一起玩捉迷藏', sing: '咩了一首歌' },
+        calm: 'Puff 很安心，毛蓬蓬的。',
+        tired: 'Puff 有點累，但不擔心什麼。',
+        missed: '你不在的時候，Puff 有點想你'
+      }
     }
   })
 })()
