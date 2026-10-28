@@ -3,7 +3,8 @@
 // and gets a pet that can be dragged and thrown, resized with the wheel, follows you on double-click
 // (right-click stops it), looks at your pointer, sways while you type, has moods, idles without repeating
 // itself, startles, welcomes you back, watches Orca's agent tabs, reacts to the line you send, likes
-// being petted, says a short line now and then, and remembers the days you spent together. Opt-in extras:
+// being petted, says a short line now and then, remembers the days you spent together, and has feelings that
+// last (mood, affection, closeness; companion_emotion.js) with a sulk when they sink too low. Opt-in extras:
 // hide-and-seek behind the window's edges, git commit/push reactions, being caught in the act when you
 // come back, a nuzzle when the pointer rests on it, reading along on Markdown tabs, an evening lantern,
 // and singing your own audio file on a word. Full reference: docs/companion-api.md.
@@ -353,6 +354,16 @@
     const f = (id, label, desc, extra = {}) => ({ kind: 'feature', id, label, desc, ...extra })
     const optIn = (key) => (pet) => Boolean(pet.cfg[key])
     const SECTIONS = [
+      {
+        // How it feels (companion_emotion.js): drawn by the panel's 'heart' row, words only (Alt shows numbers).
+        id: 'heart',
+        label: '心情',
+        intro: '牠現在的心情、對你的好感，和你們有多親近。',
+        items: [
+          { kind: 'heart', id: 'heart', label: '現在', shows: (pet) => Boolean(pet.emotion) },
+          f('sulk', '鬧彆扭', '心情跌到谷底時（一天最多一次），牠會躲到角落背對你；來回摸牠三下就和好。', { shows: (pet) => Boolean(pet.emotion) })
+        ]
+      },
       {
         id: 'touch',
         label: '互動',
@@ -931,7 +942,13 @@
     // Few and far between: idle lines at least 6 minutes apart, any line at least 45 s apart, at most 12 a
     // day. Milestones, greetings and late-night worry skip the spacing (they are rare by nature).
     // A character with no `lines` never speaks.
-    const L = { idle: [], night: [], done: [], failed: [], welcome: [], name: [], late: [], milestone: [], found: [], notFound: [], caught: [], lantern: [], ...cfg.lines }
+    const L = {
+      idle: [], night: [], done: [], failed: [], welcome: [], name: [], late: [], milestone: [], found: [], notFound: [], caught: [], lantern: [],
+      // Its feelings speaking (companion_emotion.js): low spirits, lonely, the first low of the day, a sulk and
+      // being won back, too many failures, and a tier closer ({tier} is the new tier's name) or further apart.
+      low: [], lonely: [], lowFirst: [], sulk: [], consoled: [], anxious: [], tierUp: [], tierDown: [],
+      ...cfg.lines
+    }
     const pick = (list) => (Array.isArray(list) && list.length ? list[(Math.random() * list.length) | 0] : null)
     const today = () => new Date().toLocaleDateString('sv') // YYYY-MM-DD, local time
     const BOND_KEY = `orca-companion:${id}:bond`
@@ -939,7 +956,16 @@
     try {
       bond = { ...bond, ...JSON.parse(localStorage.getItem(BOND_KEY) || 'null') }
     } catch {}
-    const saveBond = () => store(BOND_KEY, JSON.stringify(bond))
+    // Its feelings live in the same save (bond.emo); companion_emotion.js is the model. A pet that knew you
+    // before it had feelings starts at affection 60, the days together counted toward closeness.
+    const EM = cfg.emotion === false ? null : T.companionEmotion ?? null
+    const EW = EM?.words(cfg.emotion?.words)
+    let emo = EM ? (bond.emo ? EM.normalize(bond.emo) : EM.migrate(bond)) : null
+    const saveBond = () => {
+      if (emo) bond.emo = EM.serialize(emo)
+      store(BOND_KEY, JSON.stringify(bond))
+    }
+    const emoEvent = (kind, arg) => Boolean(emo) && EM.event(emo, kind, Date.now(), arg)
     let bubble = null
     let bubbleTimer = 0
     let lastSaid = 0
@@ -1038,6 +1064,7 @@
         const n = bond.days
         if (MILESTONES.includes(n) && !bond.celebrated.includes(n) && on('milestones')) {
           bond.celebrated.push(n)
+          emoEvent('milestone')
           saveBond()
           ;(reactions.milestone ?? celebrate)(n, api)
         } else if (n > 1 && on('greet')) (reactions.greet ?? greet)(api)
@@ -1050,6 +1077,7 @@
       const h = new Date().getHours()
       bond.hours[h]++
       const total = bond.hours.reduce((a, b) => a + b, 0)
+      if (h < 5) emoEvent('late') // up in the small hours: a cloud until 05:00, not a mark against you
       if ((h >= 23 || h < 5) && total >= 60 && bond.hours[h] / total < 0.03 && bond.lateWarned !== today() && on('late')) {
         bond.lateWarned = today()
         emote('worried')
@@ -1248,7 +1276,8 @@
       sounds: Boolean(S),
       song: Boolean(typeof cfg.sing === 'string' || cfg.sing?.asset),
       songVolume: cfg.sing?.volume,
-      glow: Boolean(glowColor)
+      glow: Boolean(glowColor),
+      emotion: Boolean(EM)
     }
     const SECTIONS = CONFIG.catalog(petInfo)
     const BASE = CONFIG.defaults(SECTIONS, petInfo)
@@ -1313,8 +1342,11 @@
     let lastAct = ''
     const pickAct = () => {
       const hour = new Date().getHours()
+      // The longer feelings lean the picks too: a good day reads as happy, a lonely one as bored.
+      const l = emo ? EM.lean(emo) : null
+      const lift = (k) => Math.max(0, Math.min(1, mood[k] + (l?.[k] ?? 0)))
       const ctx = {
-        mood,
+        mood: l ? { ...mood, happy: lift('happy'), bored: lift('bored'), worried: lift('worried') } : mood,
         hour,
         night: hour >= 22 || hour < 6,
         near: Boolean(pointer && Math.hypot(pointer.x - center().x, pointer.y - center().y) < 260),
@@ -1340,7 +1372,8 @@
           if (feeling && lastAct !== 'sigh' && on('mood') && Math.random() < 0.4) emote(feeling)
           acts[lastAct]?.()
           const h = new Date().getHours()
-          if (Math.random() < 0.15 * freq('talk')) later(1200, () => say(pick(h >= 22 || h < 5 ? (L.night.length ? L.night : L.idle) : L.idle), { idle: true }))
+          const pool = emo?.lone >= 60 && L.lonely.length ? L.lonely : emo?.mood < 50 && L.low.length ? L.low : h >= 22 || h < 5 ? (L.night.length ? L.night : L.idle) : L.idle
+          if (Math.random() < 0.15 * freq('talk')) later(1200, () => say(pick(pool), { idle: true }))
         }
         scheduleIdle()
       }, (idleMin + Math.random() * (idleMax - idleMin)) / freq('idle'))
@@ -1492,6 +1525,8 @@
         const hit = words.find((w) => w.re.test(sent))
         if (!hit || (hit.react === 'sing' && !on('sing'))) return
         lastWord = now
+        const felt = { thanks: 'thanks', worried: 'bug', sing: 'sing' }[hit.react]
+        if (felt) emoEvent(felt)
         busy?.cancel()
         busy = null
         try {
@@ -1533,9 +1568,14 @@
       petFlips = 0
       petCooldown = performance.now() + 2500
       if (mode === 'asleep') wake()
+      // Sulking in its corner: each pat counts; the third wins it back.
+      if (sulking) return sulkPetted()
       bond.pets = (bond.pets || 0) + 1
+      const tierBefore = emo && EM.tierIndex(emo.aff)
+      emoEvent('pet')
       saveBond()
       reactions.happy()
+      if (emo) applyFeelings(tierBefore)
     }
     home.addEventListener('pointermove', onHover)
 
@@ -1646,6 +1686,14 @@
         if (prev && prev !== s && s === 'failed') failed = true
       }
       setVigil(working && on('vigil'))
+      // Its feelings keep the books first: a failure counts even when it is too busy, switched off or too
+      // recently sad to droop over it. Done within the hour after a failure is a relief as well.
+      if (emo && (finished || failed)) {
+        if (finished) emoEvent('pass'), emoEvent('agentDone')
+        if (failed) emoEvent('agentFail')
+        saveBond()
+        applyFeelings()
+      }
       if (finished && on('done')) twirl(), feel('happy', 0.2), later(900, () => say(pick(L.done)))
       if (failed && on('droop')) droop(), feel('worried', 0.45), later(900, () => say(pick(L.failed)))
       if (Date.now() < knockHold) return // a preview knocks on a tab that does not wait for you
@@ -1683,6 +1731,7 @@
       if (away()) return onLeave()
       const gone = awaySince ? Date.now() - awaySince : 0
       awaySince = 0
+      if (gone > 60000) emoEvent('back', gone) // it stops missing you the moment you are back
       // Sometimes (opt-in) you catch it doing something of its own; otherwise the plain welcome.
       if (gone > (cfg.welcomeAfter ?? 10 * 60000)) welcomeTimer = setTimeout(() => !stopped && !caught() && on('welcome') && reactions.welcome?.(api), 300)
     }
@@ -1730,6 +1779,127 @@
     const activity = ['pointermove', 'keydown', 'wheel', 'pointerdown']
     for (const ev of activity) addEventListener(ev, wake, { capture: true, passive: true })
     wake()
+
+    // ---------- feelings: the minute tick, and what the thresholds look like ----------
+    // The model (companion_emotion.js) only moves when ticked: once a minute, and once now to catch up on
+    // the days Orca was closed. Nothing here runs per frame or per keystroke.
+    let sulking = null
+    let low = null // the 低落 look: ears held down, a little dimmer
+    let lowSaidDay = ''
+    let lastAnxLine = 0
+    const hereNow = () => !away() && Date.now() - lastActive < 10 * 60000
+    const setLow = (flag) => {
+      if (flag === Boolean(low)) return
+      if (!flag) {
+        low.forEach((a) => a.cancel())
+        low = null
+        return
+      }
+      low = [home.animate([{ opacity: 1 }, { opacity: 0.85 }], { duration: 1200, fill: 'forwards' })]
+      if (!T.reducedMotion?.()) for (const [i, el] of parts('ears').entries()) low.push(el.animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${i % 2 ? -12 : 12}deg)` }], { duration: 1200, easing: 'ease-out', fill: 'forwards', composite: 'add' }))
+    }
+    // Reads the state after a tick or an event and lets it show; tierBefore / bandBefore are from before,
+    // for the one line said when a threshold is crossed.
+    const applyFeelings = (tierBefore = null, bandBefore = null) => {
+      if (stopped || !emo) return
+      const now = Date.now()
+      const v = EM.view(emo, now, EW)
+      setLow(v.mood < EM.P.lowBelow && !sulking)
+      if (v.mood < EM.P.lowBelow && bandBefore != null && bandBefore >= EM.P.lowBelow && lowSaidDay !== EM.dayKey()) {
+        lowSaidDay = EM.dayKey()
+        later(800, () => (emote('bored'), say(pick(L.lowFirst), { force: true })))
+      }
+      if (tierBefore != null && v.tier !== tierBefore) {
+        const up = v.tier > tierBefore
+        const line = pick(up ? L.tierUp : L.tierDown)
+        later(1500, () => {
+          emote(up ? 'happy' : 'bored')
+          if (up) happy()
+          if (line) say(line.replaceAll('{tier}', v.tierName), { force: true })
+        })
+      }
+      if (v.mood < EM.P.sulkBelow) sulk()
+      if (v.anx >= 70 && now - lastAnxLine > 30 * 60000 && free() && !busy) {
+        lastAnxLine = now
+        emote('worried')
+        say(pick(L.anxious), { force: true })
+      }
+    }
+    const emoTick = () => {
+      if (stopped || !emo) return
+      const now = Date.now()
+      const tierBefore = EM.tierIndex(emo.aff)
+      const bandBefore = EM.moodBand(emo.mood)[0]
+      EM.tick(emo, now, { present: hereNow(), sinceTouch: now - lastTouch })
+      saveBond()
+      applyFeelings(tierBefore, bandBefore)
+    }
+    if (emo) {
+      EM.tick(emo, Date.now(), { present: !away(), sinceTouch: Infinity }) // quietly: the welcome is greet's
+      saveBond()
+    }
+    const emoTimer = emo ? setInterval(emoTick, 60000) : 0
+    const emoFirst = emo ? setTimeout(() => applyFeelings(), 1500) : 0
+
+    // 消沉 (mood under 20): it drifts to the nearest bottom corner, turns half away, dims and says nothing
+    // more, for up to 30 minutes, once a day at most. Three pats win it back (a 「被哄好了」 moodlet). Off in
+    // the settings: 鬧彆扭. A preview (force) does not use up today's sulk or book anything.
+    const sulk = (force = false) => {
+      if (!emo || sulking || stopped) return false
+      if (!force && (!on('sulk') || CONFIG.quietAt(conf()) || !free() || busy || mode !== 'home' || emo.today.sulked)) return false
+      if (!force) {
+        emo.today.sulked = true
+        saveBond()
+      }
+      const me = (sulking = { pets: 0, anims: [], since: Date.now(), timer: 0, preview: force })
+      setLow(false)
+      hush()
+      busy?.cancel()
+      roaming = true
+      busy = { cancel: () => endSulk('cancel'), playState: 'running' }
+      const left = center().x < innerWidth / 2
+      const side = left ? -1 : 1
+      flyTo(clamp({ x: left ? 10 : innerWidth - BOX - 10, y: innerHeight - BOX - 48 }), 1500).then(() => {
+        if (stopped || sulking !== me) return
+        if (!T.reducedMotion?.()) {
+          me.anims.push(bob.animate([t(0, 0), t(side * 5, 6, side * 15, 0.96, 0.96)], { duration: 900, easing: 'ease-out', fill: 'forwards', composite: 'add' }))
+          for (const [i, el] of parts('ears').entries()) me.anims.push(el.animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${i % 2 ? -19 : 19}deg)` }], { duration: 900, easing: 'ease-out', fill: 'forwards', composite: 'add' }))
+        }
+        me.anims.push(home.animate([{ opacity: 1 }, { opacity: 0.62 }], { duration: 900, fill: 'forwards' }))
+        floatUp('……', C.dim, { x: center().x - side * BOX * 0.3, y: spot.y, rise: 18, ms: 2600 })
+        later(700, () => sulking === me && say(pick(L.sulk), { force: true }))
+        me.timer = setTimeout(() => sulking === me && endSulk('timeout'), 30 * 60000)
+      })
+      return true
+    }
+    const endSulk = (why) => {
+      if (!sulking) return
+      const me = sulking
+      sulking = null
+      clearTimeout(me.timer)
+      me.anims.forEach((a) => a.cancel())
+      busy = null
+      const back = () => {
+        if (stopped || drag || mode !== 'home') return void (roaming = false)
+        flyTo(homeSpot(), 1100).then(() => (roaming = false))
+      }
+      if (why !== 'consoled') return back()
+      if (!me.preview) emoEvent('comforted'), saveBond()
+      home.animate([{ opacity: 0.62 }, { opacity: 1 }], { duration: 500 })
+      happy()
+      later(600, () => say(pick(L.consoled), { force: true }))
+      later(1800, back)
+      later(2000, () => applyFeelings())
+    }
+    // A pat while it sulks: a small flinch, then the third one wins it back.
+    const sulkPetted = () => {
+      if (!sulking) return
+      sulking.pets++
+      touched()
+      if (sulking.pets >= 3) return endSulk('consoled')
+      bob.animate([t(0, 0), t(0, -3, 0, 1.02), t(0, 0)], { duration: 320, easing: 'ease-out', composite: 'add' })
+      floatUp(sulking.pets === 1 ? '……' : '…？', C.dim, { y: spot.y, rise: 16, ms: 1600 })
+    }
 
     // ---------- size: the wheel over it (0.5x to 2.5x, remembered) ----------
     const onWheel = (e) => {
@@ -1917,7 +2087,7 @@
     // ---------- clicks: one = a poke (or go answer the waiting tab; or hide, when hide-and-seek is on), two = follow ----------
     let clickTimer = 0
     const singleClick = () => {
-      if (mode === 'hiding') return seek && comeHome(true) // found it
+      if (mode === 'hiding') return seek && (emoEvent('played'), comeHome(true)) // found it
       if (mode === 'visiting') {
         // A tab of another worktree (not laid out): that worktree comes to the front first.
         const id = visitingTab?.getAttribute('data-tab-id')
@@ -2797,6 +2967,11 @@
       },
       done: () => (twirl(), later(900, () => say(pick(L.done), { force: true }))),
       droop: () => droop(),
+      // The sulk as it would happen, then (unless you pat it three times first) it comes round on its own.
+      sulk: () => {
+        if (!sulk(true)) return false
+        later(9000, () => sulking?.preview && endSulk('consoled'))
+      },
       speech: () => say(pick(L.idle) ?? pick(L.welcome), { force: true }),
       sound: () => sound('welcome', 0.05, 0.11),
       chime: () => sound('pet', 0.07, 0.1),
@@ -2827,6 +3002,7 @@
         lastActive = at
       }
       if (wentOff('lantern')) lanternTick()
+      if (sulking && wentOff('sulk')) endSulk('cancel')
       if (wentOff('vigil') || wentOff('knock')) readStatus()
     }
     addEventListener('orca-themer:state', refresh)
@@ -2849,7 +3025,10 @@
       stats: () => ({ days: bond.days, pets: bond.pets || 0, met: bond.met, celebrated: bond.celebrated.length }),
       // Forgets the days together, the petting and the hours it learned; starts over today.
       forget() {
+        if (sulking) endSulk('cancel')
         bond = { met: today(), days: 0, last: '', hours: Array(24).fill(0), celebrated: [], lateWarned: '', said: { date: today(), n: 0 }, pets: 0 }
+        if (emo) emo = EM.create()
+        setLow(false)
         meetToday()
         if (ready()) {
           emote('curious')
@@ -2952,7 +3131,37 @@
         return conf()
       },
       panel,
-      preview: (rowId, from) => panel.preview(rowId, from)
+      preview: (rowId, from) => panel.preview(rowId, from),
+      // Its feelings (null with `emotion: false`): view() for the panel; event(kind) books one from your own
+      // acts ('asked', 'ignored', 'played', 'fail', 'pass'...); set() puts a value where a threshold can be
+      // watched; tick() runs the minute tick now; sulk()/consoled() play the sulk.
+      emotion: emo
+        ? {
+            view: () => emo && EM.view(emo, Date.now(), EW),
+            event: (kind, arg) => {
+              const tierBefore = EM.tierIndex(emo.aff)
+              const ok = emoEvent(kind, arg)
+              saveBond()
+              applyFeelings(tierBefore)
+              return ok
+            },
+            set: (part) => {
+              for (const k of ['mood', 'aff', 'close', 'anx', 'lone']) if (typeof part?.[k] === 'number' && Number.isFinite(part[k])) emo[k] = Math.max(0, Math.min(100, part[k]))
+              if (part?.sulkedToday === false) emo.today.sulked = false
+              saveBond()
+              return EM.view(emo, Date.now(), EW)
+            },
+            tick: () => (emoTick(), EM.view(emo, Date.now(), EW)),
+            sulk: () => sulk(true),
+            consoled: () => Boolean(sulking) && (endSulk('consoled'), true),
+            get sulking() {
+              return sulking ? { pets: sulking.pets, since: sulking.since, preview: sulking.preview } : null
+            },
+            get low() {
+              return Boolean(low)
+            }
+          }
+        : null
     }
     T.companions.set(id, api)
     meetToday()
@@ -2976,8 +3185,10 @@
       clearTimeout(gazeTimer)
       cancelAnimationFrame(statusQueued)
       for (const timer of [faceTimer, glowTimer, sleepTimer, zTimer, clickTimer, idleTimer, blinkTimer, petReset, landTimer, welcomeTimer, nuzzleTimer, firstLantern]) clearTimeout(timer)
-      for (const timer of [reposition, moodTimer, statusTimer, bondTimer, readTimer, lanternTimer]) clearInterval(timer)
+      for (const timer of [reposition, moodTimer, statusTimer, bondTimer, readTimer, lanternTimer, emoTimer]) clearInterval(timer)
       clearTimeout(meetTimer)
+      clearTimeout(emoFirst)
+      clearTimeout(sulking?.timer)
       endSeek(false)
       stopSing()
       stopAudio()
