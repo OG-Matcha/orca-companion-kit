@@ -51,7 +51,7 @@ $s.Save()
 | `~/.orca/themer/terminal/` | 終端機配色 |
 | `~/.orca/themer/sounds/` | 通知音效 |
 | `~/.orca/themer/assets/<主題 id>/` | 主題用的圖片 |
-| `~/.orca/themer/settings.json` | 選了哪個主題、開了哪些 touch、`enabledFixes` |
+| `~/.orca/themer/settings.json` | 選了哪個主題、開了哪些 touch、`enabledFixes`、每隻寵物的設定（`companions`，只記跟預設不同的部分） |
 | `~/.orca/themer/themer.log` | 啟動器紀錄（每次啟動會重寫） |
 
 想放在別處：設定環境變數 `ORCA_THEMER_ROOT`。

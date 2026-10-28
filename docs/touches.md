@@ -46,12 +46,18 @@ window.__orcaThemer?.registerAttrTouch('focus-glow', { label: '聚焦光暈', de
 | `reducedMotion()` | 系統是否設定「減少動態」 |
 | `log(message)` | 寫一行到 `~/.orca/themer/themer.log` |
 | `openPicker()` | 打開 Ctrl+Alt+T 選單 |
+| `registerPickerItem({ id, label, sub, when?, run })` | 在選單的「設定」區加一列，點了就關掉選單、呼叫 `run()`；`when()` 回傳 `false` 時不顯示 |
+| `setOverlay({ isOpen, close } \| null)` | 從選單打開的面板登記在這裡，再按一次 Ctrl+Alt+T 就呼叫 `close()`，而不是開選單 |
+| `updateState(patch)`、`send(message)` | 先在這個視窗套用狀態（送出 `orca-themer:state`），再請啟動器存檔；寵物設定用的是 `{ type: 'companion-config', id, config }` |
+| `openCompanionSettings(id)` | 打開（或關掉）某隻寵物的設定面板 |
+| `companionConfig` | 寵物設定的目錄與純函式（`catalog`、`defaults`、`normalize`、`diff`、`quietAt`……），見 companion-api.md「設定面板」 |
 
 ## 事件
 
 | 事件（`window`） | `detail` | 誰送的 |
 | --- | --- | --- |
 | `orca-themer:combo` | 目前的連擊數 | power-mode，每一次連擊 +1 |
+| `orca-themer:state` | 無 | 執行環境：`state` 變了（換主題、開關 touch、改寵物設定），也包括別的視窗改的 |
 
 ## 寫 touch 的規則
 

@@ -38,6 +38,7 @@
 | 摸摸牠 | 游標在牠身上來回移動 |
 | 說話 | 對話框一個字一個字打出來。閒置台詞至少間隔 6 分鐘，任何台詞至少間隔 45 秒，一天最多 12 句 |
 | 記得你們的日子 | 一起過了幾天、第 7／30／100／200／365… 天會慶祝、依時段打招呼、比你平常晚很多還在用時會擔心你。全部只存在 localStorage |
+| 右鍵 | 打開牠的[設定面板](#設定面板)（跟著你的時候，右鍵是讓牠停下） |
 | 點一下 | 戳戳牠；在敲門時點牠，會切到那個分頁（用真的 pointerdown／mouseup 事件，因為 Orca 在 pointerdown 就切分頁，只送 `click()` 不會動） |
 | 唱歌 | 送出的那一行有「唱歌」「搖籃曲」、`sing`、`lullaby`，牠就唱：晃來晃去、冒音符。設了 `sing` 又放了你自己的音檔，就會放那段音樂（見下方「用自己的音檔唱歌」） |
 
@@ -45,7 +46,7 @@
 
 ### 要自己打開的行為
 
-下面這些預設關著，在設定裡寫 `true`（或一個選項物件）才會有。Puff 全都開了，可以拿來看效果。
+下面這些預設關著，在設定裡寫 `true`（或一個選項物件）才會有。Puff 全都開了，可以拿來看效果。使用者也可以在[設定面板](#設定面板)自己打開或關掉；寵物設定裡寫的只是預設值。
 
 | 設定 | 牠會做什麼 | 選項 |
 | --- | --- | --- |
@@ -91,6 +92,8 @@
 | `visitTabs` | boolean | `false` 表示不去敲等待授權的分頁 |
 | `trail` | boolean | `false` 表示跟隨時不留軌跡 |
 | `bubbleStyle` | string | 附加在對話框上的 CSS |
+| `behaviors` | `[{ id, label, desc, section?, freq?, default?, preview? }]` | 寵物自己的行為，會出現在設定面板，見下方「設定面板」 |
+| `sections` | `[{ id, label, intro }]` | 設定面板新增的分頁，給 `behaviors` 的 `section` 用 |
 | `onStart(api)` / `onStop(api)` | function | 啟動和停止時各呼叫一次。自己加的監聽器請在 `onStop` 移除 |
 
 ### 部位 `parts`
@@ -191,6 +194,65 @@ sing: { asset: 'lullaby', start: 13, length: 20, volume: 0.35 }
 reactions: { worried: (api) => { api.emote('worried'); api.acts.drizzle() } }
 ```
 
+## 設定面板
+
+每隻寵物都有一個設定面板，不用寫任何程式。打開的方法：**在寵物身上按右鍵**，或按 Ctrl+Alt+T，選單最下面「設定」區的「寵物設定」。關掉：右上角 ✕、點面板外面，或再按一次 Ctrl+Alt+T。面板不聽 Esc（在終端機裡 Esc 會中斷 Claude Code）。
+
+![Puff 的設定面板：左邊是分頁（互動、打字、日常、迎接、Agent、說話、聲音、你和牠），右邊每一列有說明、「試試看」按鈕和開關，會隨機發生的行為還有「很少／少／平常／常常」頻率](images/settings-panel.png)
+
+| 分頁 | 裡面有什麼 |
+| --- | --- |
+| 互動 | 看游標、摸摸、蹭蹭、捉迷藏、拖曳搬家、甩出去、滾輪縮放、跟著你、被嚇一跳 |
+| 打字 | 跟著打字晃、連擊光暈、聽得懂的話、一直刪字、唱歌、commit 蓋章、push 紙飛機 |
+| 日常 | 閒著的小動作、到處晃晃、心情符號、睡覺、眨眼、通知時轉圈、陪你讀文件、傍晚點燈 |
+| 迎接 | 歡迎回來、被抓包、每天打招呼、紀念日、比平常晚 |
+| Agent | 陪著工作、敲門、做完時轉圈、出錯時垂頭 |
+| 說話 | 讓牠說話、話多話少、一天最多幾句、安靜時段（這段時間不說話、不出聲，動作照常） |
+| 聲音 | 讓牠出聲、鈴聲大小、唱歌音量（設了 `sing` 才有） |
+| 你和牠 | 怎麼叫你、大小、回到原位、你們的回憶、忘掉回憶、設定全部恢復預設 |
+
+- 每一列都有開關；會隨機或定時發生的（閒置動作、睡覺、讀文件、被抓包……）另有頻率。**試試看**會馬上演一次，不管開關、機率和冷卻。
+- 寵物做不到的列不會出現：沒有 `lines` 就沒有「說話」，`sounds: false` 就沒有「聲音」，拿掉了 `wander` 動作就沒有「到處晃晃」。
+- 改了馬上生效，所有 Orca 視窗一起。啟動器把它存在 `~/.orca/themer/settings.json` 的 `companions.<寵物 id>`，只記跟預設不同的部分，以後預設改了，沒動過的人會跟著新預設。
+- 台詞裡寫 `{you}` 會換成「怎麼叫你」填的名字；沒填名字時，`{you}` 和它後面的逗號一起拿掉。打招呼和歡迎回來的台詞，有名字時會自動加在前面。
+
+### 讓自己的寵物加進面板
+
+在寵物設定寫 `behaviors`，每一筆就是面板上的一列：
+
+```js
+T.registerCompanion({
+  id: 'my-pet',
+  // …
+  acts: {
+    spin: { weight: 2, run: (api) => api.act([api.t(0, 0), api.t(0, -6, 360), api.t(0, 0)], 900) },
+    water: { weight: 0, run: (api) => api.sparkle(10) }
+  },
+  sections: [{ id: 'garden', label: '花園', intro: '牠照顧的小花園。' }],   // 新分頁（放在「你和牠」前面）
+  behaviors: [
+    // id 和某個動作同名時，閒置挑動作會照這一列的開關和頻率：關了就不挑，「常常」權重乘 2。
+    { id: 'spin', label: '轉圈圈', desc: '閒著的時候偶爾原地轉一圈。', freq: true, preview: (api) => api.acts.spin() },
+    // 自己觸發的行為：用 api.on('water') 判斷有沒有開、api.freq('water') 拿頻率倍數。
+    { id: 'water', section: 'garden', label: '澆花', desc: '每天早上澆一次花。', default: false, preview: (api) => api.acts.water() },
+    // 和內建列同一個 id：改名字、改說明、換掉試試看，或用 hidden 藏起來。
+    { id: 'startle', hidden: true },
+    { id: 'wander', label: 'Stroll', desc: 'Walks off a little way and comes back.' }
+  ]
+})
+```
+
+| 欄位 | 說明 |
+| --- | --- |
+| `id` | 英數字、`_`、`-`，最多 40 字。和內建列同名時改的是那一列 |
+| `label`、`desc` | 列的名稱和說明。面板的內建文字是中文；要換成別的語言，就用同名的 `behaviors` 一列一列改 |
+| `section` | 放在哪個分頁：`touch`、`typing`、`daily`（預設）、`welcome`、`agent`、`speech`、`sound`、`you`，或 `sections` 裡自己加的 |
+| `freq` | `true` 表示多一排「很少／少／平常／常常」（倍數 0.25、0.5、1、2） |
+| `default` | `false` 表示預設關著 |
+| `preview(api)` | 按「試試看」時做的事；沒有就不顯示這個按鈕 |
+| `hidden` | `true` 表示面板不顯示這一列，但它的預設值照舊（藏起來的捉迷藏，沒在寵物設定打開就一直關著） |
+
+自己的程式裡用 `api.on(id)`、`api.freq(id)`、`api.settings`（整份設定）讀使用者的選擇。設定的純函式在 `__orcaThemer.companionConfig`（`catalog`、`defaults`、`normalize`、`diff`、`quietAt`），`test/companion-settings.test.mjs` 直接測它們。
+
 ## `api`（傳給動作、反應、`onStart`）
 
 | 成員 | 說明 |
@@ -213,6 +275,8 @@ reactions: { worried: (api) => { api.emote('worried'); api.acts.drizzle() } }
 | `hide(want?)`、`found()`、`giveUp()`、`hiding`、`seekSpots()` | 捉迷藏：現在躲起來（`want` 可指定 `tabs`、`sidebar`、`files`、`status`、`pane`、`divider`、`toast`、`window`）、找到、放棄；目前躲的狀態；畫面上可躲的位置 |
 | `caught(scene?)`、`nuzzle()`、`read(on?)`、`reading`、`lantern(on?)`、`lit` | 被抓包、蹭蹭、讀文件、點燈：不受機率與冷卻限制，方便預覽 |
 | `vigil(on?)`、`droop()` | agent 分頁對牠做的事，拿來預覽：工作中的呼吸光暈、失敗時垂頭（做完的轉圈是 `play('twirl')`） |
+| `on(id)`、`freq(id)`、`settings` | 設定面板的選擇：某一列開著沒、頻率倍數（1 是平常）、整份設定 |
+| `preview(id, from?)`、`panel` | 播一列的「試試看」；`panel` 是設定面板用的把手（`sections`、`defaults`、`get`、`stats`、`forget`、`setSize`、`resetHome`） |
 | `acts`、`reactions`、`mood`、`lines`、`bond`、`colors` | 目前的狀態 |
 | `spot`、`center()`、`size`、`mode`、`busy` | 位置與狀態（`mode`：`home`、`asleep`、`flying`、`following`、`visiting`、`hiding`） |
 | `root`、`svg`、`host` | 寵物的容器、SVG、所在的圖層（自己加的元素放進 `host`，並設 `pointer-events:none`） |
