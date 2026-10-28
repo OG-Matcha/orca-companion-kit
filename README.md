@@ -6,6 +6,8 @@
 
 <sub>Orca 實際畫面：範例主題「棉花夜空 Cotton Sky」加上範例寵物 Puff。專案是另外建的示範資料夾。</sub>
 
+**展示影片（2 分 23 秒）**：[showcase-public.mp4](https://github.com/OG-Matcha/orca-companion-kit/releases/download/showcase-2026-10/showcase-public.mp4)，Puff 和工具包的功能一段一段演一遍（跟著游標、摸頭、捉迷藏、甩出去、打字星火、聽得懂的話、唱歌、agent 反應、git 印章與紙飛機、蹭蹭、讀文件、提燈、抓包、換主題）。隔離的 Orca 實錄，無背景音樂。
+
 ## 實際畫面
 
 以下都是照「快速開始」裝好之後，在 Windows 版 Orca 裡錄的。
