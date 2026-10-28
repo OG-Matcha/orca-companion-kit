@@ -97,6 +97,8 @@
 
 值可以是選擇器字串，或 `{ sel, origin }`。每個元素都會設定 `transform-box: fill-box`，旋轉基準點優先順序是：元素上的 `data-origin`，然後 `origin`，然後預設值。
 
+`flutter`、`ears`、`eyes` 這三種會一直動或跟著游標動的部位，請畫成 `<svg>` 的**直接子元素**（一個 `<g>`）。引擎啟動時會把它們各自抽成一層 HTML 方塊（裡面是一張同 `viewBox`、只放該部位的 SVG），疊回原本的順序，支點照它的外框和 `origin` 算；這樣循環動畫才能交給合成器跑，不然每一格都會把整張圖重畫（[performance.md](performance.md) 第 14、15 條）。巢狀在別的群組裡的部位仍然能動，只是留在 SVG 裡、吃主執行緒。
+
 | 名稱 | 引擎怎麼用 |
 | --- | --- |
 | `eyes` | 眨眼（scaleY）、看向游標（translate） |
@@ -193,7 +195,7 @@ reactions: { worried: (api) => { api.emote('worried'); api.acts.drizzle() } }
 
 | 成員 | 說明 |
 | --- | --- |
-| `act(keyframes, ms, easing?)` | 在身體上播一段動作（WAAPI，`composite: 'add'`）；播放中不會再挑閒置動作 |
+| `act(keyframes, ms, easing?)` | 在身體上播一段動作（WAAPI，`composite: 'add'`）；播放中不會再挑閒置動作。只有 `transform` 的 additive 動畫會改放進一層巢狀盒子用 replace 播（合成結果一樣，但在合成器上跑），所以 `root` 之下多了幾層 `div` |
 | `t(x, y, deg?, sx?, sy?)` | 產生一格 `transform` |
 | `at(frames, offsets)` | 替每一格加上 `offset` |
 | `animateParts(name, keyframes, options)` | 讓某個部位播動畫 |
@@ -210,6 +212,7 @@ reactions: { worried: (api) => { api.emote('worried'); api.acts.drizzle() } }
 | `sing()` | 唱歌（有音檔就放） |
 | `hide(want?)`、`found()`、`giveUp()`、`hiding`、`seekSpots()` | 捉迷藏：現在躲起來（`want` 可指定 `tabs`、`sidebar`、`files`、`status`、`pane`、`divider`、`toast`、`window`）、找到、放棄；目前躲的狀態；畫面上可躲的位置 |
 | `caught(scene?)`、`nuzzle()`、`read(on?)`、`reading`、`lantern(on?)`、`lit` | 被抓包、蹭蹭、讀文件、點燈：不受機率與冷卻限制，方便預覽 |
+| `vigil(on?)`、`droop()` | agent 分頁對牠做的事，拿來預覽：工作中的呼吸光暈、失敗時垂頭（做完的轉圈是 `play('twirl')`） |
 | `acts`、`reactions`、`mood`、`lines`、`bond`、`colors` | 目前的狀態 |
 | `spot`、`center()`、`size`、`mode`、`busy` | 位置與狀態（`mode`：`home`、`asleep`、`flying`、`following`、`visiting`、`hiding`） |
 | `root`、`svg`、`host` | 寵物的容器、SVG、所在的圖層（自己加的元素放進 `host`，並設 `pointer-events:none`） |

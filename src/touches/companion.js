@@ -33,6 +33,66 @@
     return el
   }
 
+  // Lifts the named parts (direct children of the <svg>) into HTML boxes of their own, in drawing order; see
+  // the note at its call. Returns the figure (replacing the svg in its parent), or null when nothing lifts.
+  // Each box's pivot is the part's bounding box times the part's transform-origin ('right center',
+  // '50% 100%'...), in screen px. P's entries for lifted parts become the boxes.
+  function liftParts(svg, P, names, BOX) {
+    const lifted = new Map() // element → part name
+    for (const name of names) for (const el of P[name] ?? []) if (el.parentNode === svg) lifted.set(el, name)
+    if (!lifted.size) return null
+    const vb = svg.viewBox.baseVal
+    const kx = BOX / (vb.width || 120)
+    const ky = BOX / (vb.height || 120)
+    const figure = document.createElement('div')
+    figure.style.cssText = `position:absolute;left:0;top:0;width:${BOX}px;height:${BOX}px;filter:${svg.style.filter || 'none'}`
+    const sheet = () => {
+      const s = svg.cloneNode(false)
+      s.removeAttribute('id')
+      s.style.cssText = 'position:absolute;left:0;top:0;overflow:visible'
+      return s
+    }
+    // One transform-origin token as a fraction of the part's box (a bare number is in viewBox units).
+    const frac = (tok, extent) => {
+      if (tok === 'left' || tok === 'top') return 0
+      if (tok === 'right' || tok === 'bottom') return 1
+      if (tok === 'center') return 0.5
+      const n = parseFloat(tok)
+      return Number.isNaN(n) ? 0.5 : tok.endsWith('%') ? n / 100 : extent ? n / extent : 0.5
+    }
+    const pivot = (el, box) => {
+      let [a = 'center', b = 'center'] = (el.style.transformOrigin || 'center').trim().split(/\s+/)
+      if (a === 'top' || a === 'bottom' || b === 'left' || b === 'right') [a, b] = [b, a]
+      let r
+      try {
+        r = el.getBBox()
+      } catch {
+        r = { x: vb.x, y: vb.y, width: vb.width, height: vb.height }
+      }
+      box.style.transformOrigin = `${((r.x - vb.x + frac(a, r.width) * r.width) * kx).toFixed(2)}px ${((r.y - vb.y + frac(b, r.height) * r.height) * ky).toFixed(2)}px`
+    }
+    let current = null
+    for (const child of [...svg.children]) {
+      const name = lifted.get(child)
+      if (name) {
+        const box = document.createElement('div')
+        box.style.cssText = `position:absolute;left:0;top:0;width:${BOX}px;height:${BOX}px`
+        pivot(child, box)
+        child.style.transformBox = ''
+        child.style.transformOrigin = ''
+        box.appendChild(sheet()).appendChild(child)
+        figure.appendChild(box)
+        P[name][P[name].indexOf(child)] = box
+        current = null
+      } else {
+        current ??= figure.appendChild(sheet())
+        current.appendChild(child)
+      }
+    }
+    svg.replaceWith(figure)
+    return figure
+  }
+
   const DEFAULT_COLORS = {
     sparkle: '#fff7e0',
     heart: '#f5b8cf',
@@ -244,6 +304,29 @@
     const parts = (name) => P[name] ?? []
     const animateParts = (name, keyframes, options) => parts(name).forEach((el) => el.animate(keyframes, options))
 
+    // The drawing's extent and its eyes, in viewBox units, read once while the SVG is still whole (hide-and-seek
+    // slides it behind an edge by these).
+    const vb = svg.viewBox.baseVal
+    const DRAWN = (() => {
+      try {
+        const all = svg.getBBox()
+        const eyes = parts('eyes').map((e) => e.getBBox())
+        return { top: all.y, eyesBottom: eyes.length ? Math.max(...eyes.map((r) => r.y + r.height)) : null }
+      } catch {
+        return null
+      }
+    })()
+    // Parts that move all the time (the breathing part, the ears) or follow the pointer (the eyes) are lifted
+    // out of the SVG into HTML boxes of their own, each holding a same-viewBox SVG with just that part, stacked
+    // in the drawing's own order; the rest stays in sheets between them. Chromium cannot run a transform
+    // animation on an SVG child on the compositor: inside the SVG, every frame re-laid-out and repainted the
+    // whole drawing (drop-shadow included), ~10 s of main-thread time a minute while idle. An HTML box animates
+    // on the compositor. Only a part that is a direct child of the <svg> is lifted; the pivot is computed from
+    // the part's bounding box, as `transform-box: fill-box` did inside the SVG. Gradients and other <defs>
+    // still resolve: url(#id) looks across the document. (docs/performance.md, rule 14)
+    const figure = liftParts(svg, P, ['flutter', 'ears', 'eyes'], BOX)
+    const head = figure ?? svg // what turns toward the pointer
+
     // Faces: swap the open eyes for the happy or sleeping ones, when the drawing has them.
     for (const el of [...parts('happyEyes'), ...parts('sleepEyes')]) el.style.opacity = '0'
     let faceTimer = 0
@@ -260,6 +343,79 @@
       ...parts('flutter').map((el) => el.animate([{ transform: 'scaleX(1)' }, { transform: 'scaleX(.88)' }], { duration: 1400, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' })),
       ...parts('ears').map((el, i) => el.animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${i % 2 ? 3 : -3}deg)` }], { duration: 2600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out' }))
     ]
+    // A loop should run on the compositor, but Chromium runs it on the main thread when it starts while
+    // another animation on the same element is in effect, or when one lands on it later (a reaction, a
+    // fill: 'forwards' pose), and then keeps it there for good: pause()/play() do not bring it back. Once the
+    // element is back to just its loop, a fresh copy at the same currentTime (no visible jump) is composited
+    // again. Done right after each other animation on that element ends, and on the 5 s recheck.
+    // (docs/performance.md, rule 15)
+    const seats = [] // [get, set] of each loop that should stay composited
+    const reseat = ([get, set]) => {
+      const loop = get()
+      if (stopped || !loop || loop.playState !== 'running') return
+      const el = loop.effect.target
+      if (!el.isConnected || el.getAnimations().some((a) => a !== loop)) return
+      const keyframes = loop.effect.getKeyframes().map(({ computedOffset, ...k }) => k)
+      const fresh = Element.prototype.animate.call(el, keyframes, loop.effect.getTiming())
+      fresh.playbackRate = loop.playbackRate
+      fresh.currentTime = loop.currentTime
+      loop.cancel()
+      set(fresh)
+    }
+    const keepComposited = (el, get, set) => {
+      const seat = [get, set]
+      seats.push(seat)
+      const settle = () => requestAnimationFrame(() => reseat(seat))
+      const own = el.animate
+      el.animate = function (keyframes, options) {
+        const a = own.call(this, keyframes, options)
+        // The loops themselves (infinite, replace) do not count; everything else is reseated after.
+        if (!(options?.iterations === Infinity && (options.composite ?? 'replace') === 'replace')) a.finished.then(settle, settle)
+        return a
+      }
+    }
+    loops.forEach((loop, i) => keepComposited(loop.effect.target, () => loops[i], (a) => (loops[i] = a)))
+
+    // Reactions (a sway per keystroke, a startle, a twirl, the droop...) are added on top of the loop and of
+    // each other with composite: 'add', and Chromium runs an additive animation on the main thread, with a
+    // style recalc every frame and the loop under it dragged along: ~10 s a minute while typing. Instead
+    // each element gets a few nested same-size boxes (same pivot) and every additive transform animation
+    // plays in a free box of its own, replacing nothing: nested transforms compose exactly like added
+    // ones, and each runs on the compositor. Order is kept (a new one goes inside the innermost busy box);
+    // only when none is free does it fall back to adding, as before.
+    const LAYERS = 4
+    const stacked = (el) => {
+      const boxes = []
+      let parent = el
+      const kids = [...el.childNodes]
+      for (let i = 0; i < LAYERS; i++) {
+        const box = document.createElement('div')
+        box.style.cssText = `position:absolute;left:0;top:0;width:100%;height:100%;transform-origin:${el.style.transformOrigin || '50% 50%'}`
+        parent.appendChild(box)
+        boxes.push({ box, anim: null })
+        parent = box
+      }
+      parent.append(...kids)
+      const taken = (b) => {
+        const a = b.anim
+        if (!a || a.playState === 'idle' || a.replaceState === 'removed') return false
+        if (a.playState !== 'finished') return true
+        const fill = a.effect?.getTiming().fill
+        return fill === 'forwards' || fill === 'both'
+      }
+      const own = el.animate
+      el.animate = function (keyframes, options) {
+        if (options?.composite !== 'add' || !keyframes.every((k) => Object.keys(k).every((p) => p === 'transform' || p === 'offset' || p === 'easing'))) return own.call(this, keyframes, options)
+        const inner = boxes.findLastIndex(taken)
+        const b = boxes.slice(inner + 1).find((x) => !taken(x)) ?? boxes.find((x) => !taken(x))
+        if (!b) return Element.prototype.animate.call(boxes.at(-1).box, keyframes, options)
+        b.anim = Element.prototype.animate.call(b.box, keyframes, { ...options, composite: 'replace' })
+        return b.anim
+      }
+      return parent // where the content now lives
+    }
+    const bobInner = stacked(bob)
+    for (const name of ['flutter', 'ears', 'eyes']) for (const el of parts(name)) if (el instanceof HTMLElement) stacked(el)
 
     // ---------- where it is and how big ----------
     const SPOT_KEY = `orca-companion:${id}:spot`
@@ -332,21 +488,32 @@
     const reposition = setInterval(() => {
       onResize() // the sidebar can be dragged wider or collapsed
       if (mode === 'home' && !held.size && getComputedStyle(home).opacity !== '1') hold([{ opacity: 1 }, { opacity: 1 }], { duration: 1, fill: 'forwards' })
+      seats.forEach(reseat) // a loop that fell back to the main thread gets its composited copy (see keepComposited)
     }, 5000)
 
     // ---------- small effects ----------
-    const floatUp = (glyph, color, { x = center().x, y = spot.y + BOX * 0.1, rise = 30, ms = 1100, px = 0 } = {}) => {
+    const floatUp = (glyph, color, { x = center().x, y = spot.y + BOX * 0.1, rise = 30, ms = 1100, px = 0, glow = false } = {}) => {
       const el = document.createElement('div')
       el.textContent = glyph
-      el.style.cssText = `position:absolute;left:${x}px;top:${y}px;font:600 ${px || Math.round(12 * Math.max(1, size * 0.8))}px/1 system-ui;color:${color};text-shadow:0 0 6px ${color};pointer-events:none;white-space:nowrap`
+      const shadow = glow ? `0 0 4px #fff,0 0 10px ${color},0 0 22px ${color}` : `0 0 6px ${color}`
+      el.style.cssText = `position:absolute;left:${x}px;top:${y}px;font:600 ${px || Math.round(12 * Math.max(1, size * 0.8))}px/1 system-ui;color:${color};text-shadow:${shadow};pointer-events:none;white-space:nowrap`
       host.appendChild(el)
       const dx = (Math.random() - 0.5) * 24
+      // A glowing glyph (the notes) pops in at once and stays bright for most of its rise; a plain sign
+      // fades in and out around the middle.
       el.animate(
-        [
-          { transform: 'translate(0,0) scale(.6)', opacity: 0 },
-          { transform: `translate(${dx * 0.4}px,${-rise * 0.4}px) scale(1)`, opacity: 1, offset: 0.25 },
-          { transform: `translate(${dx}px,${-rise}px) scale(.8)`, opacity: 0 }
-        ],
+        glow
+          ? [
+              { transform: 'translate(0,0) scale(.5)', opacity: 0 },
+              { transform: `translate(${dx * 0.2}px,${-rise * 0.15}px) scale(1.15)`, opacity: 1, offset: 0.12 },
+              { transform: `translate(${dx * 0.7}px,${-rise * 0.7}px) scale(1)`, opacity: 1, offset: 0.72 },
+              { transform: `translate(${dx}px,${-rise}px) scale(.9)`, opacity: 0 }
+            ]
+          : [
+              { transform: 'translate(0,0) scale(.6)', opacity: 0 },
+              { transform: `translate(${dx * 0.4}px,${-rise * 0.4}px) scale(1)`, opacity: 1, offset: 0.25 },
+              { transform: `translate(${dx}px,${-rise}px) scale(.8)`, opacity: 0 }
+            ],
         { duration: ms, easing: 'ease-out' }
       ).onfinish = () => el.remove()
     }
@@ -673,7 +840,7 @@
             const star = document.createElement('div')
             star.textContent = '✦'
             star.style.cssText = `position:absolute;left:${HALF - 6}px;top:${BOX * 0.06}px;font:600 ${Math.round(BOX * 0.33)}px/1 system-ui;color:${C.sparkle};text-shadow:0 0 10px ${C.alert};pointer-events:none`
-            bob.appendChild(star)
+            bobInner.appendChild(star)
             stars.push(star)
             const arc = Array.from({ length: 13 }, (_, k) => {
               const a = (k / 12) * Math.PI * 2
@@ -825,29 +992,53 @@
     }
 
     // ---------- gaze: eyes and body turn toward the pointer when it comes near ----------
-    svg.style.transformOrigin = '50% 85%'
-    svg.style.transition = 'transform .45s cubic-bezier(.3,.7,.4,1)'
+    head.style.transformOrigin = '50% 85%'
+    head.style.transition = 'transform .45s cubic-bezier(.3,.7,.4,1)'
     for (const el of parts('eyes')) el.style.transition = 'transform .25s ease-out'
-    const eyeReach = cfg.eyeTravel ?? [2.2, 1.6] // px in the drawing's own units, roughly
-    let gazeQueued = 0
+    const eyeReach = cfg.eyeTravel ?? [2.2, 1.6] // in the drawing's own units (viewBox)
+    // The eyes are HTML boxes now (see liftParts), so a glance is in screen px. Unchanged values are not
+    // written again: each write restarts the transition (a style recalc per pointer frame for the same look).
+    const eyeK = figure ? BOX / (vb.width || 120) : 1
+    let eyesNow = ''
+    let headNow = ''
+    const lookEyes = (x = 0, y = 0) => {
+      const v = x || y ? `translate(${(x * eyeK).toFixed(1)}px,${(y * eyeK).toFixed(1)}px)` : ''
+      if (v === eyesNow) return
+      eyesNow = v
+      for (const el of parts('eyes')) el.style.transform = v
+    }
+    const turnHead = (v) => v !== headNow && (head.style.transform = headNow = v)
+    let gazeQueued = 0 // a frame id, or -1 while the trailing timer waits
+    let gazeTimer = 0
+    let gazeLast = 0
+    // At most every 60 ms: the head eases over .45 s and the eyes over .25 s anyway, so following each
+    // pointer frame only restarted those transitions for the same look. A trailing call catches the last move.
+    const GAZE_MS = 60
     const gaze = () => {
       gazeQueued = 0
       if (stopped) return
+      const now = performance.now()
+      if (now - gazeLast < GAZE_MS) {
+        gazeQueued = -1
+        gazeTimer = setTimeout(gaze, GAZE_MS - (now - gazeLast))
+        return
+      }
+      gazeLast = now
       const awake = mode === 'home' || mode === 'following'
       const dx = pointer ? pointer.x - center().x : 0
       const dy = pointer ? pointer.y - center().y : 0
       const dist = Math.hypot(dx, dy)
       const reach = 360 * size
       if (!awake || drag || !pointer || dist < 8 || dist > reach) {
-        svg.style.transform = ''
-        for (const el of parts('eyes')) el.style.transform = ''
+        turnHead('')
+        lookEyes()
         return
       }
       const pull = Math.min(1, (reach - dist) / (reach * 0.5)) // full attention when close, fading far away
       const ux = dx / dist
       const uy = dy / dist
-      for (const el of parts('eyes')) el.style.transform = `translate(${(ux * eyeReach[0] * pull).toFixed(2)}px,${(uy * eyeReach[1] * pull).toFixed(2)}px)`
-      svg.style.transform = `rotate(${(ux * 7 * pull).toFixed(2)}deg) translate(${(ux * 2 * pull).toFixed(2)}px,${(Math.min(0, uy) * 1.5 * pull).toFixed(2)}px)`
+      lookEyes(ux * eyeReach[0] * pull, uy * eyeReach[1] * pull)
+      turnHead(`rotate(${(ux * 7 * pull).toFixed(1)}deg) translate(${(ux * 2 * pull).toFixed(1)}px,${(Math.min(0, uy) * 1.5 * pull).toFixed(1)}px)`)
     }
     const onPointer = (e) => {
       const now = performance.now()
@@ -863,7 +1054,9 @@
       lastPointer = p
       pointer = p
       if (seek?.spot && mode === 'hiding') seekNear(p)
-      if (!gazeQueued) gazeQueued = requestAnimationFrame(gaze)
+      // Far away with its head already straight there is nothing to turn: no frame is asked for.
+      const far = Math.hypot(p.x - center().x, p.y - center().y) > 400 * size
+      if (!gazeQueued && !(far && !headNow && !eyesNow)) gazeQueued = requestAnimationFrame(gaze)
     }
     addEventListener('pointermove', onPointer, { capture: true, passive: true })
 
@@ -1000,18 +1193,23 @@
         vigil = null
       }
     }
+    // The glow also fades for the combo, the droop and the sleep; the breathing loop gets back to the
+    // compositor after each (see keepComposited).
+    keepComposited(glow, () => (vigil?.effect ? vigil : null), (a) => (vigil = a))
     // Something failed: it visibly sags for a couple of seconds (head down, body squashed, ears flat, the
     // fluttering part folded, glow out), then slowly picks itself back up. Reduced motion keeps only the dim.
     const droop = () => {
       if (mode !== 'home') return
-      const D = 2600
-      const sag = (from, to) => [from, { ...to, offset: 0.18 }, { ...to, offset: 0.72 }, from]
+      // Big enough to read at 64 px: it sinks a third of its height, tips over, the ears fold flat and the
+      // wool deflates; each transform plays in its own box (stacked), so all of it stays on the compositor.
+      const D = 3200
+      const sag = (from, to) => [from, { ...to, offset: 0.16 }, { ...to, offset: 0.74 }, from]
       if (!T.reducedMotion?.()) {
-        bob.animate(sag({ transform: 'translateY(0)' }, { transform: `translateY(${BOX * 0.23}px) rotate(-11deg) scale(.94,.86)` }), { duration: D, easing: 'cubic-bezier(.3,.7,.3,1)', composite: 'add' })
-        animateParts('ears', sag({ transform: 'scaleY(1)' }, { transform: 'scaleY(.62)' }), { duration: D, easing: 'ease-out', composite: 'add' })
-        animateParts('flutter', sag({ transform: 'scaleX(1)' }, { transform: 'scaleX(.66)' }), { duration: D, easing: 'ease-out', composite: 'add' })
+        bob.animate(sag({ transform: 'translateY(0)' }, { transform: `translateY(${BOX * 0.32}px) rotate(-18deg) scale(.9,.76)` }), { duration: D, easing: 'cubic-bezier(.3,.7,.3,1)', composite: 'add' })
+        animateParts('ears', sag({ transform: 'scaleY(1) rotate(0deg)' }, { transform: 'scaleY(.35) rotate(14deg)' }), { duration: D, easing: 'ease-out', composite: 'add' })
+        animateParts('flutter', sag({ transform: 'scale(1)' }, { transform: 'scale(.5,.6)' }), { duration: D, easing: 'ease-out', composite: 'add' })
       }
-      bob.animate(sag({ opacity: 1 }, { opacity: 0.55 }), { duration: D, easing: 'ease-out' })
+      bob.animate(sag({ opacity: 1 }, { opacity: 0.45 }), { duration: D, easing: 'ease-out' })
       if (glowColor) glow.animate(sag({ opacity: baseGlow }, { opacity: 0 }), { duration: D, easing: 'ease-out' })
       later(300, () => emote('worried'))
     }
@@ -1446,12 +1644,14 @@
       if (song !== s) return false
       if (mode !== 'home') return stopSing(), false
       const ms = played ? (SING.length ?? 20) * 1000 : 4000
-      s.sway = bob.animate([t(0, 0), t(-3, -1, -7), t(0, -2), t(3, -1, 7), t(0, 0)], { duration: 3800, iterations: Infinity, easing: 'ease-in-out', composite: 'add' })
+      // A sway you can see from across the window, and notes a third of its size that glow as they rise.
+      s.sway = bob.animate([t(0, 0), t(-5, -3, -12), t(0, -5, 0, 1.04), t(5, -3, 12), t(0, 0)], { duration: 3200, iterations: Infinity, easing: 'ease-in-out', composite: 'add' })
       setFace('happy', ms)
       const notes = (i = 0) => {
         if (song !== s) return
-        floatUp(['♪', '♫', '♩'][i % 3], i % 4 === 3 ? C.heart : C.note, { x: center().x + (i % 2 ? 14 : -4) * size, y: center().y - BOX * 0.47 * size, rise: 38, ms: 2000 })
-        s.notes = setTimeout(() => notes(i + 1), 700 + Math.random() * 500)
+        const side = i % 2 ? 1 : -1
+        floatUp(['♪', '♫', '♩', '♪'][i % 4], i % 4 === 3 ? C.heart : C.note, { x: center().x + side * BOX * 0.34 * size, y: center().y - BOX * 0.55 * size, rise: 60 * size, ms: 2600, px: Math.round(BOX * 0.44 * size), glow: true })
+        s.notes = setTimeout(() => notes(i + 1), 420 + Math.random() * 300)
       }
       notes()
       s.end = setTimeout(() => song === s && stopSing(), ms)
@@ -1544,20 +1744,18 @@
       if (seek?.geom) return seek.geom
       let top = BOX * 0.15
       let eyesBottom = BOX * 0.55
-      try {
-        const vb = svg.viewBox.baseVal
+      if (DRAWN) {
         const k = BOX / (vb.height || 120)
-        top = (svg.getBBox().y - vb.y) * k
-        const eyes = parts('eyes')
-        if (eyes.length) eyesBottom = Math.max(...eyes.map((e) => e.getBBox()).map((r) => r.y + r.height - vb.y)) * k
-      } catch {}
+        top = (DRAWN.top - vb.y) * k
+        if (DRAWN.eyesBottom != null) eyesBottom = (DRAWN.eyesBottom - vb.y) * k
+      }
       const g = { duck: HALF + 2 - top, tips: HALF - 6 - top, rest: (b) => Math.round(HALF - 13 - top + ((HALF - 2 - eyesBottom) - (HALF - 13 - top)) * b), pop: -BOX * 0.7 }
       if (seek) seek.geom = g
       return g
     }
     const seekPoseNow = () => {
       if (!seek?.pose) return { x: 0, y: seek?.d ?? 0, deg: 0 }
-      const m = new DOMMatrix(getComputedStyle(bob).transform)
+      const m = new DOMMatrix(getComputedStyle(seek.pose.effect?.target ?? bob).transform) // the pose plays in a box of its own (stacked)
       return { x: m.e, y: m.f, deg: (Math.atan2(m.b, m.a) * 180) / Math.PI }
     }
     // Slides to a pose: y (+ is further behind the edge), a little sideways x, a head tilt.
@@ -1973,7 +2171,7 @@
       reading = null
       clearTimeout(r.timer)
       r.anims.forEach((a) => a.cancel())
-      for (const el of parts('eyes')) el.style.transform = ''
+      lookEyes()
       for (const el of parts('glasses')) el.animate([{ opacity: 1, transform: 'none' }, { opacity: 0, transform: 'translateY(-7px)' }], { duration: 320 }).onfinish = () => (el.style.opacity = '0')
       if (busy === r.hold) busy = null
       // Looks up from the page with a small hop of relief.
@@ -2002,7 +2200,7 @@
         bob.animate([{ transform: 'rotate(0deg)' }, { transform: `rotate(${dir * 3}deg)` }], { duration: 1500, delay: 1700, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out', composite: 'add' })
       )
       sparkle(5, BOX * 0.4)
-      for (const el of parts('eyes')) el.style.transform = `translate(${dir * 2}px,1.2px)`
+      lookEyes(dir * 2, 1.2)
       later(1500, () => reading === rd && floatUp('…', C.calm, { x: center().x + BOX * 0.25 * size, y: center().y - BOX * 0.56 * size, rise: 20, ms: 2200 }))
       return true
     }
@@ -2037,6 +2235,11 @@
         halo.style.opacity = '.7'
         return
       }
+      // The lighting below overlaps these loops, which parks them on the main thread; once it ends each
+      // gets a composited copy (keepComposited). Nothing on body or halo holds a transform with fill: 'forwards'
+      // while they loop: a loop hidden under one still costs a frame every frame.
+      keepComposited(body, () => (lantern === Lt ? Lt.anims[0] : null), (a) => (Lt.anims[0] = a))
+      keepComposited(halo, () => (lantern === Lt ? Lt.anims[1] : null), (a) => (Lt.anims[1] = a))
       Lt.anims.push(
         // Sways softly like a hanging lamp, and breathes a warm light.
         body.animate([{ transform: 'rotate(-5deg)' }, { transform: 'rotate(5deg)' }], { duration: 2600, iterations: Infinity, direction: 'alternate', easing: 'ease-in-out', delay: 700 }),
@@ -2133,6 +2336,10 @@
       seekSpots: () => SEEK.spots(measureSeek().rects, { w: innerWidth, h: innerHeight }),
       caught: (scene = true) => (wake(), busy?.cancel(), (busy = null), caught(scene)),
       nuzzle: () => nuzzle(true),
+      // What an agent tab does to it, callable for a preview: the breathing glow while one works, the
+      // sag when one fails (done is `play('twirl')`).
+      vigil: (on = true) => (setVigil(on), true),
+      droop: () => (droop(), true),
       read: (on = true) => (on ? read(true) : (endReading(), true)),
       get reading() {
         return Boolean(reading)
@@ -2161,6 +2368,7 @@
       cancelAnimationFrame(flightRaf)
       cancelAnimationFrame(followRaf)
       cancelAnimationFrame(gazeQueued)
+      clearTimeout(gazeTimer)
       cancelAnimationFrame(statusQueued)
       for (const timer of [faceTimer, glowTimer, sleepTimer, zTimer, clickTimer, idleTimer, blinkTimer, petReset, landTimer, welcomeTimer, nuzzleTimer, firstLantern]) clearTimeout(timer)
       for (const timer of [reposition, moodTimer, statusTimer, bondTimer, readTimer, lanternTimer]) clearInterval(timer)

@@ -50,7 +50,7 @@ Themes and touches run inside Orca's renderer, on the same thread as your typing
     不要動 `left`／`top`／`width`，也不要每一格改 `box-shadow`／`filter`。真的需要每一格計算的動作（甩出去、跟著游標）才用 `requestAnimationFrame`，停下來就結束迴圈。
 
 14. **一直循環的動畫不要放在 SVG 裡的 `<g>` 上。**
-    Chromium 沒辦法把 SVG 子元素的 `transform` 動畫交給合成器，每一格都要把整張 SVG（連同 `drop-shadow`）重新排版、重畫。寵物的翅膀和耳朵這樣動，閒置時每分鐘吃掉約 10 秒主執行緒，打字也跟著變慢。要一直動的部位，拆成自己的 HTML 方塊（一個 `div` 包一張同 `viewBox` 的 SVG），疊回原位。
+    Chromium 沒辦法把 SVG 子元素的 `transform` 動畫交給合成器，每一格都要把整張 SVG（連同 `drop-shadow`）重新排版、重畫。範例寵物 Puff 的絨毛和耳朵原本這樣動，閒置時每分鐘吃掉約 10 秒主執行緒，打字也跟著變慢。要一直動的部位，拆成自己的 HTML 方塊（一個 `div` 包一張同 `viewBox` 的 SVG），疊回原位。
     *No always-on loop on an SVG group: it re-lays-out and repaints the whole SVG every frame (~10 s of main-thread time a minute, measured). Give the part its own HTML box.*
 
 15. **循環動畫的元素上，別讓其他動畫跟它重疊。**
@@ -63,4 +63,37 @@ Themes and touches run inside Orca's renderer, on the same thread as your typing
 ## 怎麼確認
 
 - `npm run check`：靜態檢查。
+- `npm test` 裡的 `test/perf-rules.test.mjs`：讀 `companion.js` 的原始碼，確認會動的部位有抽成 HTML 圖層、每個循環都有 keepComposited、additive 動作有進巢狀盒子、視線有節流。
+- `npm run perf`：見下節。
 - Orca 裡內建打字延遲量測：大部分按鍵超過 200 ms 時，畫面會出現提示。按 Ctrl+Alt+T →「效能」，它會輪流關掉主題 CSS 和 touch，比較延遲的中位數，告訴你是哪一部分讓打字變慢。
+
+## 量測 `npm run perf`
+
+`npm run perf` 會開兩個隔離的 Orca（各自的 `--user-data-dir`，放在系統暫存資料夾的 `orca-perf-<pid>`，跑完刪掉；Orca 替每個新的 user-data-dir 複製的 `%LOCALAPPDATA%\Orca\daemon-host-profiles\<hash>`（約 270 MB）也一併刪），不碰你正在用的 Orca。兩個都套 Cotton Sky 主題和它列的全部 touch，一個開 Puff（a）、一個關 Puff（b），跑同一段腳本：閒置、打字（每秒 8 字、每行 Enter）、游標繞著 Puff 移動、終端機大量輸出（`tools/perf-burst.mjs` 模擬 agent）。量的是主執行緒忙碌時間（CDP `Performance.getMetrics` 的 TaskDuration）、長任務、按鍵到下一格畫面的延遲、樣式重算與排版次數、計時器、GC 後的 heap。
+
+Puff 多花的（a − b）超過預算就失敗（exit code 1）。預算在 `tools/perf.mjs` 的 `BUDGET`，設在實測值稍上方；單跑一次會上下差幾 s/分鐘。
+
+- `--pet <id> --theme <id>`：量別隻寵物（主題的 `@touches` 要列它）。
+- `--before <另一份 checkout>`：多跑一組 a0，用那份程式碼做前後對照（那份也要有 dev channel 的 `cdp` 指令）。
+- `--study`：a／b／c（c ＝ 主題但不開 touch）各 3 次交錯執行，閒置 5 分鐘，結果寫成 JSON。
+- `--trace`：打字與游標時錄 Chromium trace，印出渲染主執行緒各事件的時間；trace 檔留在 work 資料夾，可再查 Animation 事件的 `compositeFailed`。
+
+量測時別同時跑其他隔離 Orca 或重的工作，會互相搶 CPU。
+
+### 2026-10-28：圖層化前後（Puff，a − b，兩次中位數）
+
+| 項目 | 改前（main 8997ef5） | 改後 | 關掉 Puff |
+|---|---|---|---|
+| 閒置主執行緒（ms/分鐘） | 23,771 | 1,561 | 583 |
+| 閒置樣式重算（次/分鐘） | 7,410 | 779 | 59 |
+| 閒置排版（次/分鐘） | 7,404 | 44 | 4 |
+| 打字主執行緒（ms/分鐘） | 40,332 | 25,147 | 19,472 |
+| 打字 按鍵→畫面 p95（ms） | 60.1 | 44.4 | 34.9 |
+| 打字長任務（個，20 秒內） | 4 | 4 | 0 |
+| 游標主執行緒（ms/分鐘） | 33,244 | 18,021 | 9,616 |
+| 游標樣式重算（次/分鐘） | 7,460 | 7,415 | 1,432 |
+| 終端機大量輸出主執行緒（ms/分鐘） | 38,008 | 25,207 | 16,571 |
+
+改前 Puff 的三種循環（身體上下、絨毛、兩隻耳朵）都在 SVG 的 `<g>` 上，閒置時每一格都重排、重畫整張 SVG：主執行緒每分鐘忙 24 秒。抽成 HTML 圖層、循環重建回合成器、小動作改進巢狀盒子、視線節流之後，閒置只比關掉 Puff 多約 1 秒/分鐘（trace 裡四個循環的 `compositeFailed` 都是 0，剩下的是每格一次 Layerize），打字的按鍵→畫面 p95 從 60 ms 降到 44 ms。游標移動時剩下的樣式重算來自 Orca 自己的 hover 樣式加上視線轉場（每 60 ms 一次），長任務來自終端機本身。
+
+預算（`BUDGET`）：閒置 +3,000 ms/分鐘、閒置長任務 2、打字 p95 +20 ms、打字 +13,000 ms/分鐘、游標 +13,000 ms/分鐘、heap +15 MB/小時；2026-10-28 實測 a − b 為 +978、0、+9.5、+5,675、+8,405、+10.6，全部通過。
