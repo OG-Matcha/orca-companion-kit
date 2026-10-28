@@ -11,6 +11,11 @@
   const touches = new Map() // id -> { start(ctx) -> stop }
   const running = new Map() // id -> stop
   const touchErrors = [] // { id, error } for touches whose start() threw
+  const pickerItems = new Map() // id -> { label, sub, when?, run }: extra rows (a pet's settings panel)
+  let overlay = null // a panel opened from the picker: { isOpen, close }; Ctrl+Alt+T closes it
+  // Pet settings changed in this window and not yet echoed back by the launcher: id -> { json, at }.
+  // A broadcast sent before the launcher saw them carries older values and must not undo them.
+  const pendingCompanions = new Map()
   let state = { themes: [], snippets: [], themeId: null, enabledSnippets: [], enabledTouches: [] }
   let css = ''
   // The typing diagnosis switches these off for a few seconds at a time to compare.
@@ -86,6 +91,8 @@
 #${PICKER_ID} .otp-row:focus-visible{outline:2px solid var(--ring);outline-offset:-2px}
 #${PICKER_ID} .otp-mark{flex:none;width:14px;height:14px;border-radius:50%;border:1.5px solid var(--muted-foreground);transition:background .15s,border-color .15s,box-shadow .15s}
 #${PICKER_ID} .otp-row[data-kind]:not([data-kind=theme]) .otp-mark{border-radius:4px}
+#${PICKER_ID} .otp-row[data-kind=action] .otp-mark{border:0;border-radius:0;width:14px;text-align:center;line-height:14px;font-size:13px;color:var(--muted-foreground)}
+#${PICKER_ID} .otp-row[data-kind=action] .otp-mark::before{content:'›'}
 #${PICKER_ID} .otp-row[aria-checked=true] .otp-mark{border-color:var(--primary);background:var(--primary);box-shadow:inset 0 0 0 2.5px var(--popover)}
 #${PICKER_ID} .otp-text{display:flex;flex-direction:column;min-width:0}
 #${PICKER_ID} .otp-sub{font-size:11.5px;color:var(--muted-foreground);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -105,6 +112,14 @@
 
   function apply(next) {
     state = { ...state, ...next.state }
+    if (next.state?.companions && pendingCompanions.size) {
+      const merged = { ...next.state.companions }
+      for (const [id, p] of pendingCompanions) {
+        if (JSON.stringify(merged[id] ?? null) === p.json || Date.now() - p.at > 10000) pendingCompanions.delete(id)
+        else merged[id] = JSON.parse(p.json)
+      }
+      state.companions = merged
+    }
     css = next.css ?? css
     whenReady(() => {
       ensureUiStyle()
@@ -113,6 +128,7 @@
       document.documentElement.dataset.orcaTheme = state.themeId ?? ''
       syncTouches()
       renderPicker()
+      dispatchEvent(new CustomEvent('orca-themer:state'))
     })
   }
 
@@ -132,8 +148,8 @@
       const b = document.createElement('button')
       b.className = 'otp-row'
       b.dataset.kind = kind
-      b.setAttribute('role', kind === 'theme' ? 'radio' : 'checkbox')
-      b.setAttribute('aria-checked', String(checked))
+      b.setAttribute('role', kind === 'theme' ? 'radio' : kind === 'action' ? 'button' : 'checkbox')
+      if (kind !== 'action') b.setAttribute('aria-checked', String(checked))
       b.innerHTML = '<span class="otp-mark"></span><span class="otp-text"><span class="otp-label"></span><span class="otp-sub"></span></span>'
       b.querySelector('.otp-label').textContent = label
       b.querySelector('.otp-sub').textContent = sub ?? ''
@@ -156,6 +172,21 @@
         const t = touches.get(id)
         row(t?.label ?? id, t?.description, state.enabledTouches.includes(id), () => send({ type: 'toggle-touch', id }), 'touch')
       }
+    }
+    const extras = [...pickerItems.values()].filter((item) => {
+      try {
+        return item.when?.() ?? true
+      } catch {
+        return false
+      }
+    })
+    if (extras.length) {
+      section('設定')
+      for (const item of extras)
+        row(item.label, item.sub, false, () => {
+          closePicker()
+          item.run()
+        }, 'action')
     }
     if (lag || diagnosis) {
       section('效能')
@@ -218,6 +249,8 @@
       if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === 't' || e.key === 'T')) {
         e.preventDefault()
         e.stopPropagation()
+        // The same shortcut closes a panel opened from the picker (a pet's settings).
+        if (overlay?.isOpen?.()) return overlay.close()
         openPicker()
       }
     },
@@ -364,6 +397,25 @@
           return () => document.documentElement.removeAttribute(`data-orca-touch-${id}`)
         }
       })
+    },
+    // A row in the picker's 「設定」 section: { id, label, sub, when?: () => boolean, run }.
+    registerPickerItem(item) {
+      if (item?.id) pickerItems.set(item.id, item)
+    },
+    unregisterPickerItem(id) {
+      pickerItems.delete(id)
+    },
+    setOverlay(next) {
+      overlay = next
+    },
+    send,
+    // A change made in this window shows at once; the launcher saves it and its broadcast follows.
+    updateState(patch) {
+      const before = state.companions ?? {}
+      for (const [id, config] of Object.entries(patch?.companions ?? {}))
+        if (config !== before[id]) pendingCompanions.set(id, { json: JSON.stringify(config ?? null), at: Date.now() })
+      state = { ...state, ...patch }
+      dispatchEvent(new CustomEvent('orca-themer:state'))
     },
     reducedMotion,
     log: (message) => send({ type: 'log', message: String(message) }),
