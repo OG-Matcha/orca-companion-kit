@@ -249,6 +249,272 @@
   }
   T.companionRules = { seek: SEEK, gitMoment, isReadable, lanternPhase, defaultWords: DEFAULT_WORDS, openTab }
 
+  // ---------- settings: the catalog the settings panel is drawn from, and the pure helpers ----------
+  // Each pet's settings are one object, saved by the launcher as settings.json "companions"[<pet id>]
+  // (only what differs from that pet's defaults) and handed to the page as T.state.companions[<pet id>].
+  // The engine reads it at every trigger point (memoized); companion_settings.js draws the panel from
+  // the same catalog. A pet adds rows of its own with `behaviors` (docs/companion-api.md「設定面板」).
+  const CONFIG = (() => {
+    const VERSION = 1
+    // How often a random or timed behaviour happens: a multiplier.
+    const FREQ_STEPS = [
+      [0.25, '很少'],
+      [0.5, '少'],
+      [1, '平常'],
+      [2, '常常']
+    ]
+    // kind: 'feature' (on/off; freq: true adds how-often), 'freq', 'number', 'quiet', 'range', 'name',
+    // 'size', 'home', 'stats', 'forget', 'resetAll'. `on(pet)` is a feature's default (built-in behaviours
+    // are on; the opt-in ones follow the pet's own config). `shows(pet)` drops a row the pet cannot do
+    // (no lines, no sounds). `preview: false` hides the 「試試看」 button.
+    const f = (id, label, desc, extra = {}) => ({ kind: 'feature', id, label, desc, ...extra })
+    const optIn = (key) => (pet) => Boolean(pet.cfg[key])
+    const SECTIONS = [
+      {
+        id: 'touch',
+        label: '互動',
+        intro: '摸牠、抓牠、跟牠玩的方式。',
+        items: [
+          f('gaze', '看你的游標', '游標靠近時，牠的眼睛和身體會轉過去。'),
+          f('pet', '摸摸', '游標在牠身上來回移動幾下，牠會開心地冒愛心。'),
+          f('nuzzle', '蹭蹭', '游標停在牠身上不動，牠會靠過來蹭你。', { on: optIn('nuzzle') }),
+          f('seek', '捉迷藏', '點牠一下，牠會躲到視窗某個邊緣後面偷看你，點到就找到了。', { on: (pet) => Boolean(pet.cfg.hideAndSeek) && pet.cfg.hideAndSeek?.click !== false }),
+          f('drag', '拖曳搬家', '按住拖到別處、慢慢放下，那裡就是牠的新家。'),
+          f('throw', '甩出去', '拖著用力一甩，牠會飛出去撞牆反彈，再飄回家。'),
+          f('wheel', '滾輪縮放', '游標放在牠身上滾滾輪，可以放大或縮小。'),
+          f('follow', '跟著你', '雙擊牠，牠就一路跟著游標走；按右鍵停下。'),
+          f('startle', '被嚇一跳', '游標從牠身邊快速掠過，牠會嚇一跳。')
+        ]
+      },
+      {
+        id: 'typing',
+        label: '打字',
+        intro: '你在終端機打字時，牠的反應。',
+        items: [
+          f('sway', '跟著打字晃', '你打字時，牠跟著節奏左右晃。'),
+          f('comboGlow', '連擊光暈', '連續打字時，身後的光越來越亮，每 50 下轉一圈。', { shows: (pet) => pet.glow }),
+          f('words', '聽得懂的話', '送出的那一行有牠認得的詞（完成、謝謝、bug、問句、牠的名字），牠會回應。'),
+          f('puzzled', '一直刪字', '短時間按很多下退格，牠會歪頭看你。'),
+          f('sing', '唱歌', '送出「唱歌」或 sing，牠就唱給你聽。'),
+          f('gitCommit', 'commit 蓋章', '送出 git commit，牠在旁邊蓋一個印章。', { on: optIn('git') }),
+          f('gitPush', 'push 紙飛機', '送出 git push，牠折一架紙飛機扔出去。', { on: optIn('git') })
+        ]
+      },
+      {
+        id: 'daily',
+        label: '日常',
+        intro: '沒事的時候，牠自己找事做。',
+        items: [
+          f('idle', '閒著的小動作', '每隔一陣子做點小事，不會連兩次一樣。', { freq: true }),
+          f('wander', '到處晃晃', '偶爾出去走一小段，看看四周再回家。', { freq: true, shows: (pet) => pet.acts.has('wander') }),
+          f('mood', '心情符號', '最近發生的事會影響牠，頭上偶爾冒出心情符號。'),
+          f('sleep', '睡覺', '一陣子沒動靜就睡著。頻率調高，牠更快睡著。', { freq: true }),
+          f('blink', '眨眼', '每隔幾秒眨一下眼睛。', { on: (pet) => pet.cfg.blink !== false, shows: (pet) => pet.parts.has('eyes') }),
+          f('toast', '通知時轉圈', 'Orca 跳出通知時，牠開心地轉一圈。'),
+          f('read', '陪你讀文件', '使用中的分頁是 Markdown 或 README 時，牠偶爾湊過去一起讀。', { freq: true, on: optIn('readAlong') }),
+          f('lantern', '傍晚點燈', '每天傍晚點一盞小燈籠陪你一整晚，早上吹熄。', { on: optIn('lantern') })
+        ]
+      },
+      {
+        id: 'welcome',
+        label: '迎接',
+        intro: '你離開又回來的時候。',
+        items: [
+          f('welcome', '歡迎回來', '離開一陣子再回來，牠會跳起來歡迎你。'),
+          f('caught', '被抓包', '回來時偶爾撞見牠在偷玩，嚇一跳、臉紅、假裝沒事。', { freq: true, on: optIn('caught') }),
+          f('greet', '每天打招呼', '每天第一次見面，依時段打招呼。'),
+          f('milestones', '紀念日', '一起滿 7、30、100 天這些日子，牠會慶祝。'),
+          f('late', '比平常晚', '比你平常的時間晚很多還在用，牠會擔心你。', { shows: (pet) => pet.speaks })
+        ]
+      },
+      {
+        id: 'agent',
+        label: 'Agent',
+        intro: 'Agent 工作時，牠在做什麼。',
+        items: [
+          f('vigil', '陪著工作', 'Agent 工作時，牠身後的光慢慢呼吸。', { shows: (pet) => pet.glow }),
+          f('knock', '敲門', '有分頁在等你授權，牠飛過去敲一敲；點牠就切過去。', { on: (pet) => pet.cfg.visitTabs !== false }),
+          f('done', '做完時轉圈', 'Agent 做完，牠轉一圈。'),
+          f('droop', '出錯時垂頭', 'Agent 出錯，牠垂頭喪氣一下，再振作起來。')
+        ]
+      },
+      {
+        id: 'speech',
+        label: '說話',
+        intro: '頭上冒出的那一句話。',
+        items: [
+          f('speech', '讓牠說話', '頭上偶爾冒出一句話。關掉就一句都不說。', { shows: (pet) => pet.speaks }),
+          { kind: 'freq', id: 'talk', label: '話多話少', desc: '沒事找你聊天的機會有多少。', dependsOn: 'speech', shows: (pet) => pet.speaks },
+          { kind: 'number', id: 'dailyCap', path: 'speech.dailyCap', label: '一天最多幾句', desc: '說滿了就等到明天。', unit: '句', min: 0, max: 60, step: 1, dependsOn: 'speech', shows: (pet) => pet.speaks },
+          { kind: 'quiet', id: 'quiet', label: '安靜時段', desc: '這段時間不說話、不出聲，動作照常。', shows: (pet) => pet.speaks || pet.sounds }
+        ]
+      },
+      {
+        id: 'sound',
+        label: '聲音',
+        intro: '牠的小鈴聲，和唱歌時放的音檔。安靜時段也會讓它們停下。',
+        items: [
+          f('sound', '讓牠出聲', '鈴聲和唱歌音檔的總開關。', { shows: (pet) => pet.sounds }),
+          { kind: 'range', id: 'chime', path: 'sound.chime', label: '鈴聲大小', desc: '摸摸、歡迎、蓋章時那些小鈴聲。', min: 0, max: 2, step: 0.05, percent: true, dependsOn: 'sound', shows: (pet) => pet.sounds },
+          { kind: 'range', id: 'song', path: 'sound.song', label: '唱歌音量', desc: '唱歌時放你的音檔，開頭淡入、結尾淡出到這個大小。', min: 0, max: 1, step: 0.05, percent: true, dependsOn: 'sound', shows: (pet) => pet.sounds && pet.song }
+        ]
+      },
+      {
+        id: 'you',
+        label: '你和牠',
+        intro: '牠怎麼叫你、記得什麼。',
+        items: [
+          { kind: 'name', id: 'name', label: '怎麼叫你', desc: '打招呼和歡迎你回來時，會叫你的名字。', shows: (pet) => pet.speaks },
+          { kind: 'size', id: 'size', label: '大小', desc: '也可以把游標放在牠身上滾滾輪。' },
+          { kind: 'home', id: 'home', label: '回到原位', desc: '送牠回預設的位置，拖過的新家不算了。' },
+          { kind: 'stats', id: 'stats', label: '你們的回憶' },
+          { kind: 'forget', id: 'forget', label: '忘掉回憶', desc: '一起的天數、摸摸次數、紀念日都歸零，從頭認識你。設定會留著。' },
+          { kind: 'resetAll', id: 'resetAll', label: '設定全部恢復預設', desc: '開關、頻率、聲音都回到原本的樣子，回憶不受影響。' }
+        ]
+      }
+    ]
+    const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v)
+    const shown = (item, pet) => {
+      try {
+        return item.shows?.(pet) ?? true
+      } catch {
+        return false
+      }
+    }
+
+    /**
+     * The panel of one pet: the built-in sections with the rows this pet can do, plus its own `behaviors`
+     * (one with a built-in id renames, hides or re-previews that row instead). A hidden row stays in the
+     * catalog with `hidden: true`, so its default still holds; the panel just does not draw it. `pet`
+     * describes the pet without the DOM: { cfg, acts: Set, parts: Set, speaks, sounds, song, songVolume, glow }.
+     */
+    function catalog(pet) {
+      const sections = SECTIONS.map((s) => ({ ...s, items: s.items.map((i) => ({ ...i })) }))
+      for (const extra of [].concat(pet.cfg.sections ?? [])) {
+        if (!isObj(extra) || typeof extra.id !== 'string' || sections.some((s) => s.id === extra.id)) continue
+        sections.splice(sections.length - 1, 0, { id: extra.id, label: String(extra.label ?? extra.id), intro: String(extra.intro ?? ''), items: [] })
+      }
+      for (const b of [].concat(pet.cfg.behaviors ?? [])) {
+        if (!isObj(b) || typeof b.id !== 'string' || !/^[\w-]{1,40}$/.test(b.id)) continue
+        const same = sections.flatMap((s) => s.items).find((i) => i.id === b.id)
+        if (same) {
+          for (const k of ['label', 'desc', 'hidden']) if (k in b) same[k] = b[k]
+          if (typeof b.preview === 'function') same.run = b.preview
+          continue
+        }
+        const section = sections.find((s) => s.id === (b.section ?? 'daily')) ?? sections.find((s) => s.id === 'daily')
+        section.items.push({
+          kind: 'feature',
+          id: b.id,
+          label: String(b.label ?? b.id),
+          desc: String(b.desc ?? ''),
+          freq: Boolean(b.freq),
+          own: true,
+          on: () => b.default !== false,
+          run: typeof b.preview === 'function' ? b.preview : null,
+          preview: typeof b.preview === 'function'
+        })
+      }
+      for (const s of sections) s.items = s.items.filter((i) => shown(i, pet))
+      return sections.filter((s) => s.items.length)
+    }
+    const items = (sections) => sections.flatMap((s) => s.items)
+
+    const num = (v, min, max, fallback) => {
+      const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v
+      return typeof n === 'number' && Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback
+    }
+    // Defaults: how the pet behaves with no settings at all (its own config decides the opt-in rows).
+    function defaults(sections, pet) {
+      const all = items(sections)
+      const on = (i) => {
+        try {
+          return i.on ? Boolean(i.on(pet)) : true
+        } catch {
+          return false
+        }
+      }
+      return {
+        v: VERSION,
+        features: Object.fromEntries(all.filter((i) => i.kind === 'feature').map((i) => [i.id, on(i)])),
+        freq: Object.fromEntries(all.filter((i) => (i.kind === 'feature' && i.freq) || i.kind === 'freq').map((i) => [i.id, 1])),
+        speech: { dailyCap: 12 },
+        quiet: { on: false, start: '23:00', end: '07:00' },
+        sound: { chime: 1, song: num(pet.songVolume, 0, 1, 0.35) },
+        you: { name: '' }
+      }
+    }
+    const hm = (v, fallback) => (typeof v === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(v) ? v : fallback)
+    const snapFreq = (v) => {
+      const n = num(v, 0, 10, 1)
+      return FREQ_STEPS.reduce((best, [s]) => (Math.abs(s - n) < Math.abs(best - n) ? s : best), 1)
+    }
+    const clone = (o) => JSON.parse(JSON.stringify(o))
+
+    // Any saved value (partial, hand-edited, broken, from an older version) -> a complete config.
+    function normalize(raw, base) {
+      const r = isObj(raw) ? raw : {}
+      const out = clone(base)
+      if (isObj(r.features)) for (const id in out.features) if (typeof r.features[id] === 'boolean') out.features[id] = r.features[id]
+      if (isObj(r.freq)) for (const id in out.freq) if (r.freq[id] != null) out.freq[id] = snapFreq(r.freq[id])
+      out.speech.dailyCap = Math.round(num(r.speech?.dailyCap, 0, 60, base.speech.dailyCap))
+      const q = isObj(r.quiet) ? r.quiet : {}
+      out.quiet.on = typeof q.on === 'boolean' ? q.on : base.quiet.on
+      out.quiet.start = hm(q.start, base.quiet.start)
+      out.quiet.end = hm(q.end, base.quiet.end)
+      out.sound.chime = num(r.sound?.chime, 0, 2, base.sound.chime)
+      out.sound.song = num(r.sound?.song, 0, 1, base.sound.song)
+      const name = r.you?.name
+      out.you.name = typeof name === 'string' ? name.replace(/[\u0000-\u001f]/g, '').trim().slice(0, 16) : ''
+      return out
+    }
+    // What to save: only what differs from the defaults, so a later default reaches anyone who never changed it.
+    function changed(cfg, base) {
+      const out = {}
+      for (const [k, v] of Object.entries(cfg)) {
+        if (k === 'v') continue
+        if (isObj(v)) {
+          const d = changed(v, base?.[k] ?? {})
+          if (Object.keys(d).length) out[k] = d
+        } else if (v !== base?.[k]) out[k] = v
+      }
+      return out
+    }
+    const diff = (cfg, base) => ({ v: VERSION, ...changed(cfg, base) })
+    // A copy of cfg with one dotted path set.
+    function setPath(cfg, path, value) {
+      const next = clone(cfg)
+      const keys = path.split('.')
+      let o = next
+      for (const k of keys.slice(0, -1)) o = o[k] = isObj(o[k]) ? o[k] : {}
+      o[keys.at(-1)] = value
+      return next
+    }
+    const getPath = (cfg, path) => path.split('.').reduce((o, k) => o?.[k], cfg)
+    // Is `minutes` (since midnight) inside [start, end)? An end earlier than the start runs past midnight.
+    const toMin = (s) => {
+      const [h, m] = String(s).split(':').map(Number)
+      return h * 60 + m
+    }
+    function inWindow(minutes, start, end) {
+      const a = toMin(start)
+      const b = toMin(end)
+      if (a === b) return false
+      return a < b ? minutes >= a && minutes < b : minutes >= a || minutes < b
+    }
+    const quietAt = (cfg, date = new Date()) => cfg.quiet.on && inWindow(date.getHours() * 60 + date.getMinutes(), cfg.quiet.start, cfg.quiet.end)
+    // A line that names you: {you} in it is replaced (or dropped with its comma when no name is set);
+    // `prefix` puts the name in front of a line that has no {you}.
+    const withName = (line, name, prefix = false) => {
+      if (!line) return line
+      const s = String(line)
+      if (s.includes('{you}')) return name ? s.replaceAll('{you}', name) : s.replace(/\{you\}[，,、]?\s*/g, '')
+      return name && prefix ? `${name}，${s}` : s
+    }
+    return { VERSION, FREQ_STEPS, SECTIONS, catalog, items, defaults, normalize, diff, setPath, getPath, inWindow, quietAt, withName }
+  })()
+  T.companionConfig = CONFIG
+
   T.registerCompanion = function registerCompanion(cfg) {
     if (!cfg?.id || typeof cfg.svg !== 'string') throw new Error('registerCompanion needs { id, svg }')
     T.registerTouch(cfg.id, {
@@ -266,7 +532,8 @@
     const HALF = BOX / 2
     const C = { ...DEFAULT_COLORS, ...cfg.colors }
     const S = cfg.sounds === false ? null : { ...DEFAULT_SOUNDS, ...(typeof cfg.sounds === 'object' ? cfg.sounds : {}) }
-    const sound = (name, gain = 0.05, gap) => S?.[name] && chime(S[name], gain * (S.gain ?? 1), gap)
+    // Settings (on, freq, conf, canSound...) are defined after the acts, below; these only run later.
+    const sound = (name, gain = 0.05, gap) => S?.[name] && canSound() && chime(S[name], gain * (S.gain ?? 1) * conf().sound.chime, gap)
     const host = layer()
 
     // ---------- the element ----------
@@ -603,9 +870,10 @@
     }
     const say = (text, { idle = false, force = false } = {}) => {
       const now = Date.now()
-      if (!text || stopped || document.hidden || !['home', 'visiting'].includes(mode)) return false
+      if (!text || stopped || document.hidden || !['home', 'visiting'].includes(mode) || !canSpeak()) return false
       if (bond.said.date !== today()) bond.said = { date: today(), n: 0 }
-      if (!force && (now - lastSaid < 45000 || bond.said.n >= 12 || (idle && now - lastIdleSaid < 6 * 60000))) return false
+      if (!force && (now - lastSaid < 45000 || bond.said.n >= conf().speech.dailyCap || (idle && now - lastIdleSaid < (6 * 60000) / freq('talk')))) return false
+      text = CONFIG.withName(text, conf().you.name)
       bond.said.n++
       saveBond()
       lastSaid = now
@@ -671,7 +939,7 @@
       const h = new Date().getHours()
       emote(h >= 23 || h < 5 ? 'sleepy' : 'happy')
       act([t(0, 0), t(-3, -8, -10), t(0, 0), t(3, -8, 10), t(0, 0)], 1300, 'cubic-bezier(.3,.7,.4,1)')
-      const line = greetLine()
+      const line = CONFIG.withName(greetLine(), conf().you.name, true)
       if (line) later(500, () => say(line, { force: true }))
     }
     // Counts a new day the first time it sees you that day (also past midnight with Orca open).
@@ -685,11 +953,11 @@
         if (stopped) return
         if (document.hidden || !document.hasFocus() || mode !== 'home') return (meetTimer = setTimeout(meet, 5000))
         const n = bond.days
-        if (MILESTONES.includes(n) && !bond.celebrated.includes(n)) {
+        if (MILESTONES.includes(n) && !bond.celebrated.includes(n) && on('milestones')) {
           bond.celebrated.push(n)
           saveBond()
           ;(reactions.milestone ?? celebrate)(n, api)
-        } else if (n > 1) (reactions.greet ?? greet)(api)
+        } else if (n > 1 && on('greet')) (reactions.greet ?? greet)(api)
       }
       meetTimer = setTimeout(meet, 4500)
     }
@@ -699,7 +967,7 @@
       const h = new Date().getHours()
       bond.hours[h]++
       const total = bond.hours.reduce((a, b) => a + b, 0)
-      if ((h >= 23 || h < 5) && total >= 60 && bond.hours[h] / total < 0.03 && bond.lateWarned !== today()) {
+      if ((h >= 23 || h < 5) && total >= 60 && bond.hours[h] / total < 0.03 && bond.lateWarned !== today() && on('late')) {
         bond.lateWarned = today()
         emote('worried')
         feel('worried', 0.15)
@@ -885,6 +1153,34 @@
       else actTable[name] = { weight: 2, ...spec }
     }
     const signatureName = cfg.signature && actTable[cfg.signature] ? cfg.signature : 'wiggle'
+
+    // ---------- settings: what the panel switched on or off (CONFIG above; panel: companion_settings.js) ----------
+    // Read at every trigger point; rebuilt only when the saved object changes. A switch that is off only
+    // stops the behaviour from starting on its own: 「試試看」 still plays it (preview below).
+    const petInfo = {
+      cfg,
+      acts: new Set(Object.keys(actTable)),
+      parts: new Set(Object.keys(P).filter((k) => P[k].length)),
+      speaks: Object.values(L).some((v) => (Array.isArray(v) ? v.length > 0 : v && typeof v === 'object' && Object.values(v).some((a) => a?.length))),
+      sounds: Boolean(S),
+      song: Boolean(typeof cfg.sing === 'string' || cfg.sing?.asset),
+      songVolume: cfg.sing?.volume,
+      glow: Boolean(glowColor)
+    }
+    const SECTIONS = CONFIG.catalog(petInfo)
+    const BASE = CONFIG.defaults(SECTIONS, petInfo)
+    let confMemo = { raw: undefined, value: null }
+    const conf = () => {
+      const raw = T.state?.companions?.[id] ?? null
+      if (!confMemo.value || confMemo.raw !== raw) confMemo = { raw, value: CONFIG.normalize(raw, BASE) }
+      return confMemo.value
+    }
+    const on = (feature) => conf().features[feature] !== false // a row this pet does not show counts as on
+    const freq = (feature) => conf().freq[feature] ?? 1
+    let previewUntil = 0 // a preview speaks and sounds even when switched off or in quiet hours
+    const previewing = () => Date.now() < previewUntil
+    const canSpeak = () => previewing() || (on('speech') && !CONFIG.quietAt(conf()))
+    const canSound = () => previewing() || (on('sound') && !CONFIG.quietAt(conf()))
     const acts = {}
     for (const [name, spec] of Object.entries(actTable)) {
       acts[name] = () => {
@@ -943,8 +1239,8 @@
       }
       const weights = {}
       for (const [name, spec] of Object.entries(actTable)) {
-        if (name === lastAct) continue
-        const w = typeof spec.weight === 'function' ? spec.weight(ctx) : spec.weight
+        if (name === lastAct || !on(name)) continue
+        const w = (typeof spec.weight === 'function' ? spec.weight(ctx) : spec.weight) * freq(name)
         if (w > 0) weights[name] = w
       }
       let r = Math.random() * Object.values(weights).reduce((a, b) => a + b, 0)
@@ -955,16 +1251,16 @@
     let idleTimer = 0
     const scheduleIdle = () => {
       idleTimer = setTimeout(() => {
-        if (!document.hidden && mode === 'home' && !busy && !drag) {
+        if (!document.hidden && mode === 'home' && !busy && !drag && on('idle')) {
           lastAct = pickAct()
           const feeling = topMood()
-          if (feeling && lastAct !== 'sigh' && Math.random() < 0.4) emote(feeling)
+          if (feeling && lastAct !== 'sigh' && on('mood') && Math.random() < 0.4) emote(feeling)
           acts[lastAct]?.()
           const h = new Date().getHours()
-          if (Math.random() < 0.15) later(1200, () => say(pick(h >= 22 || h < 5 ? (L.night.length ? L.night : L.idle) : L.idle), { idle: true }))
+          if (Math.random() < 0.15 * freq('talk')) later(1200, () => say(pick(h >= 22 || h < 5 ? (L.night.length ? L.night : L.idle) : L.idle), { idle: true }))
         }
         scheduleIdle()
-      }, idleMin + Math.random() * (idleMax - idleMin))
+      }, (idleMin + Math.random() * (idleMax - idleMin)) / freq('idle'))
     }
     scheduleIdle()
 
@@ -972,11 +1268,11 @@
     let blinkTimer = 0
     const blink = () => {
       blinkTimer = setTimeout(() => {
-        if (mode !== 'asleep' && !document.hidden) animateParts('eyes', [{ transform: 'scaleY(1)' }, { transform: 'scaleY(.12)' }, { transform: 'scaleY(1)' }], { duration: 170, composite: 'add' })
+        if (mode !== 'asleep' && !document.hidden && on('blink')) animateParts('eyes', [{ transform: 'scaleY(1)' }, { transform: 'scaleY(.12)' }, { transform: 'scaleY(1)' }], { duration: 170, composite: 'add' })
         blink()
       }, 2500 + Math.random() * 4500)
     }
-    if (cfg.blink !== false) blink()
+    blink()
 
     // ---------- startle: the pointer whips past close by ----------
     let lastPointer = null
@@ -1009,6 +1305,7 @@
     }
     const turnHead = (v) => v !== headNow && (head.style.transform = headNow = v)
     let gazeQueued = 0 // a frame id, or -1 while the trailing timer waits
+    let gazeAt = null // a point a preview asks it to look at
     let gazeTimer = 0
     let gazeLast = 0
     // At most every 60 ms: the head eases over .45 s and the eyes over .25 s anyway, so following each
@@ -1025,16 +1322,17 @@
       }
       gazeLast = now
       const awake = mode === 'home' || mode === 'following'
-      const dx = pointer ? pointer.x - center().x : 0
-      const dy = pointer ? pointer.y - center().y : 0
+      const target = gazeAt ?? pointer
+      const dx = target ? target.x - center().x : 0
+      const dy = target ? target.y - center().y : 0
       const dist = Math.hypot(dx, dy)
-      const reach = 360 * size
-      if (!awake || drag || !pointer || dist < 8 || dist > reach) {
+      const reach = gazeAt ? Infinity : 360 * size
+      if (!awake || drag || !target || dist < 8 || dist > reach || !(gazeAt || on('gaze'))) {
         turnHead('')
         lookEyes()
         return
       }
-      const pull = Math.min(1, (reach - dist) / (reach * 0.5)) // full attention when close, fading far away
+      const pull = gazeAt ? 1 : Math.min(1, (reach - dist) / (reach * 0.5)) // full attention when close, fading far away
       const ux = dx / dist
       const uy = dy / dist
       lookEyes(ux * eyeReach[0] * pull, uy * eyeReach[1] * pull)
@@ -1043,7 +1341,7 @@
     const onPointer = (e) => {
       const now = performance.now()
       const p = { x: e.clientX, y: e.clientY, t: now }
-      if (lastPointer && mode === 'home' && !drag && now > startleCooldown && now - lastPointer.t < 50) {
+      if (lastPointer && mode === 'home' && !drag && now > startleCooldown && now - lastPointer.t < 50 && on('startle')) {
         const speed = Math.hypot(p.x - lastPointer.x, p.y - lastPointer.y) / Math.max(1, now - lastPointer.t)
         const near = Math.hypot(p.x - center().x, p.y - center().y) < BOX * 1.1 * size
         if (near && speed > 3) {
@@ -1067,7 +1365,7 @@
     let lastSway = 0
     const onTypeSway = (e) => {
       if (!isTerminal(e.target) || e.ctrlKey || e.altKey || e.metaKey) return
-      if (mode !== 'home' || busy || drag || document.hidden) return
+      if (mode !== 'home' || busy || drag || document.hidden || !on('sway')) return
       const now = performance.now()
       if (now - lastSway < 150) return
       lastSway = now
@@ -1089,6 +1387,10 @@
     let erased = []
     let lastPuzzled = -Infinity
     let lastGit = -Infinity
+    const puzzled = () => {
+      act(at([t(0, 0), t(1, 1, 14), t(1, 1, 14), t(0, 0)], [0, 0.25, 0.75, 1]), 1800)
+      emote('curious')
+    }
     const onTypedChar = (e) => {
       if (!isTerminal(e.target) || e.ctrlKey || e.altKey || e.metaKey || e.isComposing || e.key === 'Process') return
       if (e.key === 'Enter') {
@@ -1098,14 +1400,14 @@
         const now = performance.now()
         if (mode !== 'home' || drag) return
         // A git commit or push (opt-in) comes first and has its own, shorter spacing.
-        const git = cfg.git ? gitMoment(sent) : null
-        if (git && now - lastGit > 5000) {
+        const git = gitMoment(sent)
+        if (git && on(git === 'push' ? 'gitPush' : 'gitCommit') && now - lastGit > 5000) {
           lastGit = lastWord = now
           return play(git === 'push' ? 'gitPush' : 'gitCommit')
         }
-        if (now - lastWord < 8000) return
+        if (now - lastWord < 8000 || !on('words')) return
         const hit = words.find((w) => w.re.test(sent))
-        if (!hit) return
+        if (!hit || (hit.react === 'sing' && !on('sing'))) return
         lastWord = now
         busy?.cancel()
         busy = null
@@ -1120,11 +1422,10 @@
         erased = erased.filter((t0) => now - t0 < 2500)
         erased.push(now)
         // Erasing and erasing: it tilts its head at you.
-        if (erased.length >= 8 && now - lastPuzzled > 20000 && mode === 'home' && !busy && !drag) {
+        if (erased.length >= 8 && now - lastPuzzled > 20000 && mode === 'home' && !busy && !drag && on('puzzled')) {
           lastPuzzled = now
           erased = []
-          act(at([t(0, 0), t(1, 1, 14), t(1, 1, 14), t(0, 0)], [0, 0.25, 0.75, 1]), 1800)
-          emote('curious')
+          puzzled()
         }
       } else if (e.key.length === 1) line = (line + e.key).slice(-200)
     }
@@ -1138,7 +1439,7 @@
     let petReset = 0
     let petCooldown = 0
     const onHover = (e) => {
-      if (drag || e.buttons || !['home', 'asleep'].includes(mode)) return
+      if (drag || e.buttons || !['home', 'asleep'].includes(mode) || !on('pet')) return
       const dir = Math.sign(e.movementX)
       if (!dir || dir === petDir) return
       petDir = dir
@@ -1149,6 +1450,8 @@
       petFlips = 0
       petCooldown = performance.now() + 2500
       if (mode === 'asleep') wake()
+      bond.pets = (bond.pets || 0) + 1
+      saveBond()
       reactions.happy()
     }
     home.addEventListener('pointermove', onHover)
@@ -1156,15 +1459,16 @@
     // ---------- the typing streak from power-mode brightens the glow ----------
     let baseGlow = 0.3
     let glowTimer = 0
-    const onCombo = (e) => {
+    const onCombo = (e) => on('comboGlow') && comboGlow(e.detail)
+    const comboGlow = (n) => {
       if (mode !== 'home' || !glowColor) return
-      glow.style.opacity = String(baseGlow + Math.min(1, e.detail / 60) * (1 - baseGlow))
+      glow.style.opacity = String(baseGlow + Math.min(1, n / 60) * (1 - baseGlow))
       clearTimeout(glowTimer)
       glowTimer = setTimeout(
         () => glow.animate([{ opacity: glow.style.opacity }, { opacity: baseGlow }], { duration: 900 }).finished.then(() => (glow.style.opacity = String(baseGlow))).catch(() => {}),
         1600
       )
-      if (e.detail % 50 === 0) twirl()
+      if (n % 50 === 0) twirl()
     }
     addEventListener('orca-themer:combo', onCombo)
 
@@ -1177,7 +1481,7 @@
           const toast = n.matches?.('[data-sonner-toast]') ? n : n.querySelector?.('[data-sonner-toast]')
           if (toast && !seenToasts.has(toast)) {
             seenToasts.add(toast)
-            twirl()
+            if (on('toast')) twirl()
           }
         }
     })
@@ -1238,6 +1542,7 @@
       if (!stopped) mode = 'home'
     }
     const lastStatus = new WeakMap()
+    let knockHold = 0
     const readStatus = () => {
       if (stopped) return
       let working = false
@@ -1253,10 +1558,12 @@
         if (prev === 'working' && s === 'done') finished = true
         if (prev && prev !== s && s === 'failed') failed = true
       }
-      setVigil(working)
-      if (finished) twirl(), feel('happy', 0.2), later(900, () => say(pick(L.done)))
-      if (failed) droop(), feel('worried', 0.45), later(900, () => say(pick(L.failed)))
-      if (cfg.visitTabs !== false && waiting !== visitingTab) visit(waiting)
+      setVigil(working && on('vigil'))
+      if (finished && on('done')) twirl(), feel('happy', 0.2), later(900, () => say(pick(L.done)))
+      if (failed && on('droop')) droop(), feel('worried', 0.45), later(900, () => say(pick(L.failed)))
+      if (Date.now() < knockHold) return // a preview knocks on a tab that does not wait for you
+      const want = on('knock') ? waiting : null
+      if (want !== visitingTab) visit(want)
     }
     let statusQueued = 0
     const statusObserver = new MutationObserver(() => {
@@ -1282,7 +1589,7 @@
       sound('welcome', 0.05, 0.11)
       feel('happy', 0.4)
       mood.bored = 0
-      later(1000, () => say(pick(L.welcome)))
+      later(1000, () => say(CONFIG.withName(pick(L.welcome), conf().you.name, true)))
     }
     let welcomeTimer = 0
     const onBack = () => {
@@ -1290,7 +1597,7 @@
       const gone = awaySince ? Date.now() - awaySince : 0
       awaySince = 0
       // Sometimes (opt-in) you catch it doing something of its own; otherwise the plain welcome.
-      if (gone > (cfg.welcomeAfter ?? 10 * 60000)) welcomeTimer = setTimeout(() => !stopped && !caught() && reactions.welcome?.(api), 300)
+      if (gone > (cfg.welcomeAfter ?? 10 * 60000)) welcomeTimer = setTimeout(() => !stopped && !caught() && on('welcome') && reactions.welcome?.(api), 300)
     }
     reactions.welcome ??= welcome
     addEventListener('blur', onLeave)
@@ -1303,10 +1610,10 @@
     let dozing = null
     const sleepAfter = () => {
       const hour = new Date().getHours()
-      return cfg.sleepAfter ?? (hour >= 18 || hour < 6 ? 120000 : 90000)
+      return (cfg.sleepAfter ?? (hour >= 18 || hour < 6 ? 120000 : 90000)) / freq('sleep')
     }
-    const sleep = () => {
-      if (mode !== 'home' || document.hidden || busy) return
+    const sleep = (force = false) => {
+      if (mode !== 'home' || document.hidden || (!force && (busy || !on('sleep')))) return
       mode = 'asleep'
       setFace('sleep')
       hold([{ opacity: 1 }, { opacity: 0.75 }], { duration: 1600, fill: 'forwards' })
@@ -1318,7 +1625,9 @@
       z()
     }
     let lastActive = Date.now()
+    let sleepHold = 0 // a sleep preview: activity does not wake it until then
     const wake = () => {
+      if (mode === 'asleep' && Date.now() < sleepHold) return
       lastActive = Date.now()
       clearTimeout(sleepTimer)
       sleepTimer = setTimeout(sleep, sleepAfter())
@@ -1337,6 +1646,7 @@
 
     // ---------- size: the wheel over it (0.5x to 2.5x, remembered) ----------
     const onWheel = (e) => {
+      if (!on('wheel')) return // the page scrolls as if it were not there
       e.preventDefault()
       if (seek) return // tucked behind an edge: resizing would push it out of its hiding place
       size = Math.min(2.5, Math.max(0.5, size * (e.deltaY < 0 ? 1.1 : 1 / 1.1)))
@@ -1399,7 +1709,7 @@
     const onDown = (e) => {
       hush()
       touched()
-      if (e.button !== 0 || !['home', 'asleep', 'visiting'].includes(mode)) return
+      if (e.button !== 0 || !['home', 'asleep', 'visiting'].includes(mode) || !(on('drag') || on('throw'))) return
       busy?.cancel()
       wake()
       drag = { dx: e.clientX - spot.x, dy: e.clientY - spot.y, startX: e.clientX, startY: e.clientY, moved: false, lastX: e.clientX, samples: [] }
@@ -1439,7 +1749,12 @@
       const vx = dt > 0 ? (last.x - first.x) / dt : 0
       const vy = dt > 0 ? (last.y - first.y) / dt : 0
       // A flick (fast release) throws it; a calm drop moves its home.
-      if (dt > 0 && performance.now() - last.t < 80 && Math.hypot(vx, vy) > 0.8) return throwIt(vx, vy)
+      if (dt > 0 && performance.now() - last.t < 80 && Math.hypot(vx, vy) > 0.8 && on('throw')) return throwIt(vx, vy)
+      if (!on('drag')) {
+        // Only throwing is allowed: a calm drop floats back home instead of moving it.
+        mode = 'flying'
+        return void flyTo(homeSpot(), 700).then(() => !stopped && mode === 'flying' && (mode = 'home'))
+      }
       place(spot)
       saveSpot()
       signature()
@@ -1522,7 +1837,7 @@
       }
       if (mode === 'asleep') return wake()
       if (mode !== 'home' || busy) return
-      if (SEEK_CFG && SEEK_CFG.click !== false) return hide()
+      if (on('seek')) return hide()
       reactions.poke()
     }
     const onClick = (e) => {
@@ -1534,10 +1849,18 @@
     const onDblClick = (e) => {
       e.stopPropagation()
       clearTimeout(clickTimer)
-      toggleFollow()
+      if (on('follow') || mode === 'following') toggleFollow()
     }
     home.addEventListener('click', onClick)
     home.addEventListener('dblclick', onDblClick)
+    // Right-click on it opens its settings. While it follows you, the window's right-click (captured
+    // first) stops that instead, so this only ever means "settings".
+    const onMenu = (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      T.openCompanionSettings?.(id)
+    }
+    home.addEventListener('contextmenu', onMenu)
 
     // A small prop (a stamp, a plane, a lantern) dropped into `parent`; plain DOM moved with WAAPI.
     const prop = (parent, html, css) => {
@@ -1583,7 +1906,7 @@
     }
     // `src`: an asset name or a URL. Resolves true once it is playing; false when it cannot (no file, muted).
     const playAudio = async (src, { start = 0, length = 0, volume = 0.35, fadeIn = 800, fadeOut = 1500 } = {}) => {
-      if (!S || !src || playing || stopped || document.hidden) return false
+      if (!S || !src || playing || stopped || document.hidden || !canSound()) return false
       const url = /^[a-z][a-z0-9+.-]*:/i.test(src) ? src : asset(src)
       if (!url || (await soundMuted())) return false
       if (playing || stopped || document.hidden) return false
@@ -1640,7 +1963,7 @@
       s.hold = { cancel: stopSing, playState: 'running' }
       busy?.cancel()
       busy = s.hold
-      const played = SING?.asset ? await playAudio(SING.asset, { start: SING.start ?? 0, length: SING.length ?? 20, volume: SING.volume ?? 0.35 }) : false
+      const played = SING?.asset ? await playAudio(SING.asset, { start: SING.start ?? 0, length: SING.length ?? 20, volume: conf().sound.song }) : false
       if (song !== s) return false
       if (mode !== 'home') return stopSing(), false
       const ms = played ? (SING.length ?? 20) * 1000 : 4000
@@ -1670,8 +1993,8 @@
     // (transform only) to show more or less of the drawing. How far the ears and eyes reach is read from
     // the pet's own SVG once per hide, so any drawing lines up with the edge. Rects are measured when it
     // hides and after a resize; the pointer check reuses pointermove, at most every 50 ms, against cached numbers.
-    const SEEK_CFG = cfg.hideAndSeek ? (typeof cfg.hideAndSeek === 'object' ? cfg.hideAndSeek : {}) : null
-    const SEEK_GIVE_UP = SEEK_CFG?.giveUpAfter ?? 45000
+    const SEEK_CFG = cfg.hideAndSeek && typeof cfg.hideAndSeek === 'object' ? cfg.hideAndSeek : {} // on/off: on('seek')
+    const SEEK_GIVE_UP = SEEK_CFG.giveUpAfter ?? 45000
     const CLIP = `polygon(${-2 * BOX}px ${-2 * BOX}px, ${3 * BOX}px ${-2 * BOX}px, ${3 * BOX}px ${HALF}px, ${-2 * BOX}px ${HALF}px)`
     let seek = null
     const seekLater = (fn, ms) => {
@@ -1853,7 +2176,7 @@
       home.style.clipPath = ''
       loops[0].play()
       setFace(null)
-      if (LANTERN) later(0, lanternTick) // the lantern comes back once the game is over
+      later(0, lanternTick) // the lantern comes back once the game is over
       if (!snap) return
       release()
       mode = 'home'
@@ -2046,14 +2369,14 @@
     // A scene is an act whose run() returns a cleanup function (the prop goes away when it jumps); the
     // built-in `juggle` is one. It jumps, hides the prop, blushes, says a `caught` line, then the warm
     // half of the welcome.
-    const CAUGHT = cfg.caught ? (typeof cfg.caught === 'object' ? cfg.caught : {}) : null
+    const CAUGHT = cfg.caught && typeof cfg.caught === 'object' ? cfg.caught : {} // on/off: on('caught')
     let lastCaught = -Infinity
     let lastScene = ''
     let caughtScene = null
     const caught = (force = false) => {
-      if (!force && (!CAUGHT || Date.now() - lastCaught < (CAUGHT.cooldown ?? 30 * 60000) || !free() || busy || Math.random() > (CAUGHT.chance ?? 0.6))) return false
+      if (!force && (!on('caught') || Date.now() - lastCaught < (CAUGHT.cooldown ?? 30 * 60000) / freq('caught') || !free() || busy || Math.random() > (CAUGHT.chance ?? 0.6) * freq('caught'))) return false
       if (!free() || caughtScene) return false
-      const names = (CAUGHT?.scenes ?? ['juggle']).filter((n) => acts[n])
+      const names = (CAUGHT.scenes ?? ['juggle']).filter((n) => acts[n])
       const pool = names.filter((n) => n !== lastScene)
       const name = typeof force === 'string' && acts[force] ? force : pool[(Math.random() * pool.length) | 0] ?? names[0]
       if (!name) return false
@@ -2111,12 +2434,12 @@
     }
 
     // ---------- nuzzle (opt-in): the pointer rests on it for a moment and it leans in to rub against it ----------
-    const NUZZLE = cfg.nuzzle ? (typeof cfg.nuzzle === 'object' ? cfg.nuzzle : {}) : null
+    const NUZZLE = cfg.nuzzle && typeof cfg.nuzzle === 'object' ? cfg.nuzzle : {} // on/off: on('nuzzle')
     let nuzzleTimer = 0
     let nuzzleAt = -Infinity
     let restAt = null
     const nuzzle = (force = false) => {
-      if (!force && (!free() || busy || performance.now() - nuzzleAt < (NUZZLE?.cooldown ?? 90000) || !pointer || petFlips > 1)) return false
+      if (!force && (!free() || busy || performance.now() - nuzzleAt < (NUZZLE.cooldown ?? 90000) || !pointer || petFlips > 1)) return false
       if (stopped || mode !== 'home') return false
       nuzzleAt = performance.now()
       const c = center()
@@ -2139,27 +2462,25 @@
     }
     // The pointer must have been still on it for `after` ms, and not be rubbing it (petting is its own thing).
     const onRest = (e) => {
-      if (mode !== 'home' || drag || e.buttons) return
+      if (mode !== 'home' || drag || e.buttons || !on('nuzzle')) return
       if (restAt && Math.hypot(e.clientX - restAt.x, e.clientY - restAt.y) < 3) return
       restAt = { x: e.clientX, y: e.clientY }
       clearTimeout(nuzzleTimer)
-      nuzzleTimer = setTimeout(() => !stopped && petFlips === 0 && nuzzle(), NUZZLE?.after ?? 2500)
+      nuzzleTimer = setTimeout(() => !stopped && petFlips === 0 && nuzzle(), NUZZLE.after ?? 2500)
     }
     const offRest = () => {
       clearTimeout(nuzzleTimer)
       restAt = null
     }
-    if (NUZZLE) {
-      home.addEventListener('pointermove', onRest)
-      home.addEventListener('pointerleave', offRest)
-      home.addEventListener('pointerdown', offRest)
-    }
+    home.addEventListener('pointermove', onRest)
+    home.addEventListener('pointerleave', offRest)
+    home.addEventListener('pointerdown', offRest)
     reactions.nuzzle ??= () => nuzzle(true)
 
     // ---------- read-along (opt-in): on a Markdown tab it leans toward the editor and nods as it reads ----------
     // A `glasses` part in the drawing (hidden otherwise) goes on for the while. Comes off when the tab
     // changes, it is moved or put to sleep, or it has read for `for` ms.
-    const READ = cfg.readAlong ? (typeof cfg.readAlong === 'object' ? cfg.readAlong : {}) : null
+    const READ = cfg.readAlong && typeof cfg.readAlong === 'object' ? cfg.readAlong : {} // on/off: on('read')
     for (const el of parts('glasses')) el.style.opacity = '0'
     let reading = null
     let lastRead = -Infinity
@@ -2180,13 +2501,13 @@
     const read = (force = false) => {
       if (reading) return true
       const tab = activeTab()
-      if (!force && (!READ || !free() || busy || !tab || !isReadable(tabTitle(tab)) || Date.now() - lastRead < (READ.every ?? 8 * 60000) || Date.now() - lastActive > 90000 || Math.random() > (READ.chance ?? 0.5))) return false
+      if (!force && (!on('read') || !free() || busy || !tab || !isReadable(tabTitle(tab)) || Date.now() - lastRead < (READ.every ?? 8 * 60000) / freq('read') || Date.now() - lastActive > 90000 || Math.random() > (READ.chance ?? 0.5))) return false
       if (!free()) return false
       lastRead = Date.now()
       const ed = document.querySelector('.monaco-editor, .markdown-body, [data-testid="markdown-preview"]')
       const r = ed?.getBoundingClientRect()
       const dir = r ? Math.sign(r.left + r.width / 2 - center().x) || 1 : 1
-      const rd = (reading = { tab, anims: [], timer: 0, until: Date.now() + (READ?.for ?? 45000), hold: null })
+      const rd = (reading = { tab, anims: [], timer: 0, until: Date.now() + (READ.for ?? 45000), hold: null })
       rd.hold = { cancel: endReading, playState: 'running' }
       busy?.cancel()
       busy = rd.hold
@@ -2209,18 +2530,18 @@
       if (reading) {
         const tab = activeTab()
         if (tab !== reading.tab || !isReadable(tabTitle(tab)) || mode !== 'home' || drag || document.hidden || Date.now() > reading.until) endReading()
-      } else read()
+      } else if (on('read')) read()
     }
-    const readTimer = READ ? setInterval(readTick, 4000) : 0
+    const readTimer = setInterval(readTick, 4000)
 
     // ---------- lantern (opt-in): lit the first time it is home after `from` o'clock, kept through the evening ----------
     // Also across reloads (the day it was lit is in the bond), put out at the `until` o'clock day roll.
-    const LANTERN = cfg.lantern ? (typeof cfg.lantern === 'object' ? cfg.lantern : {}) : null
+    const LANTERN = cfg.lantern && typeof cfg.lantern === 'object' ? cfg.lantern : {} // on/off: on('lantern')
     const LANTERN_SVG =
-      LANTERN?.svg ??
+      LANTERN.svg ??
       '<svg viewBox="0 0 24 36" width="100%" height="100%" style="overflow:visible"><path d="M12 1v5" stroke="#b08a4a" stroke-width="1.6" stroke-linecap="round"/><path d="M6 7h12l-1.5 3h-9z" fill="#8a4b2a"/><path d="M7 10h10c1.6 4.5 1.6 10 0 14.5H7C5.4 20 5.4 14.5 7 10z" fill="#ffd98a" stroke="#c9963f" stroke-width="1.1"/><path d="M12 14c2.2 2.6 2.2 5.6 0 8-2.2-2.4-2.2-5.4 0-8z" fill="#fff5d6"/><path d="M6.5 24.5h11l-1.5 3h-8z" fill="#8a4b2a"/><path d="M12 28v4" stroke="#b08a4a" stroke-width="1.4"/></svg>'
     let lantern = null
-    const lanternDay = () => new Date(Date.now() - (LANTERN?.until ?? 5) * 3600000).toLocaleDateString('sv') // the evening's day key: rolls at `until` o'clock
+    const lanternDay = () => new Date(Date.now() - (LANTERN.until ?? 5) * 3600000).toLocaleDateString('sv') // the evening's day key: rolls at `until` o'clock
     const showLantern = (ceremony) => {
       if (lantern || stopped) return
       const left = center().x > innerWidth / 2 // keep it on the roomier side
@@ -2268,7 +2589,8 @@
       floatUp('~', C.dim, { x: center().x + (Lt.box.style.right ? -1 : 1) * BOX * 0.62 * size, y: spot.y + 4 * size, rise: 30, ms: 1500, px: 18 })
     }
     const lanternTick = (force = false) => {
-      if (stopped || !LANTERN) return
+      if (stopped) return
+      if (!force && !on('lantern')) return void (lantern && hideLantern(false))
       const phase = force ? 'light' : lanternPhase({ hour: new Date().getHours(), day: lanternDay(), lit: bond.lanternDay, from: LANTERN.from ?? 18, until: LANTERN.until ?? 5 })
       if (phase === 'out') return void (lantern && hideLantern(!away()))
       if (phase === 'keep') return void (!lantern && mode !== 'hiding' && showLantern(false))
@@ -2278,12 +2600,197 @@
       showLantern(true)
       if (mode === 'home') later(1200, () => say(pick(L.lantern), { force: true }))
     }
-    const firstLantern = LANTERN ? setTimeout(lanternTick, 6000) : 0
-    const lanternTimer = LANTERN ? setInterval(lanternTick, 30000) : 0
+    const firstLantern = setTimeout(lanternTick, 6000)
+    const lanternTimer = setInterval(lanternTick, 30000)
+
+    // ---------- the settings panel's handle on it (companion_settings.js) ----------
+    // preview(id, from) plays one row now, as it would happen, past its switch, chance and cooldown.
+    // `from` is where the button is (the gaze preview looks there).
+    const ready = () => {
+      if (mode === 'following') stopFollow()
+      if (mode === 'hiding') endSeek()
+      if (mode === 'visiting') {
+        knock?.cancel()
+        knock = null
+        visitingTab = null
+        mode = 'home'
+        place(homeSpot())
+      }
+      if (reading) endReading()
+      caughtScene?.stop()
+      wake()
+      busy?.cancel()
+      busy = null
+      return mode === 'home' && !drag
+    }
+    const sideways = () => (center().x > innerWidth / 2 ? -1 : 1)
+    let previewTurn = 0
+    const previews = {
+      gaze: (from) => {
+        gazeAt = from ?? { x: innerWidth / 2, y: innerHeight / 2 }
+        gaze()
+        later(2600, () => ((gazeAt = null), gaze()))
+      },
+      pet: () => reactions.happy(api),
+      nuzzle: () => nuzzle(true),
+      seek: () => {
+        if (!hide()) return false
+        later(7000, () => mode === 'hiding' && comeHome(true))
+      },
+      drag: async () => {
+        mode = 'flying'
+        await flyTo(clamp({ x: spot.x + sideways() * 110, y: spot.y - 40 }), 900)
+        await wait(500)
+        if (stopped || mode !== 'flying') return
+        await flyTo(homeSpot(), 900)
+        if (stopped || mode !== 'flying') return
+        mode = 'home'
+        signature()
+      },
+      throw: () => throwIt(sideways() * 1.6, -0.9),
+      wheel: () => bob.animate([{ transform: 'scale(1)' }, { transform: 'scale(1.45)', offset: 0.35 }, { transform: 'scale(1.45)', offset: 0.6 }, { transform: 'scale(.8)', offset: 0.8 }, { transform: 'scale(1)' }], { duration: 1800, easing: 'ease-in-out', composite: 'add' }),
+      follow: () => {
+        toggleFollow()
+        later(6000, () => mode === 'following' && stopFollow())
+      },
+      startle: () => startle(center().x + sideways() * -60),
+      sway: () => {
+        for (let i = 0; i < 8; i++)
+          later(i * 190, () => {
+            swaySide = -swaySide
+            bob.animate([t(0, 0), t(swaySide * 2, -3, swaySide * 7, 1.03, 0.97), t(0, 0)], { duration: 300, easing: 'ease-out', composite: 'add' })
+          })
+      },
+      comboGlow: () => {
+        for (let i = 1; i <= 50; i++) later(i * 24, () => comboGlow(i))
+      },
+      words: () => play(['goodNews', 'thanks', 'sleepy', 'curious', ...(names.length ? ['name'] : [])][previewTurn++ % (names.length ? 5 : 4)]),
+      puzzled,
+      sing: () => play('sing'),
+      gitCommit: () => play('gitCommit'),
+      gitPush: () => play('gitPush'),
+      idle: () => acts[(lastAct = pickAct())]?.(),
+      wander: () => acts.wander?.(),
+      mood: () => emote(topMood() || ['happy', 'curious', 'sleepy', 'bored', 'worried'][previewTurn++ % 5]),
+      sleep: () => {
+        sleep(true)
+        sleepHold = Date.now() + 4800
+        later(5000, wake)
+      },
+      blink: () => animateParts('eyes', [{ transform: 'scaleY(1)' }, { transform: 'scaleY(.12)' }, { transform: 'scaleY(1)' }], { duration: 170, composite: 'add' }),
+      toast: () => twirl(),
+      read: () => {
+        if (!read(true)) return false
+        reading.until = Date.now() + 7000
+      },
+      lantern: () => {
+        hideLantern(false)
+        bond.lanternDay = ''
+        lanternTick(true)
+        later(6000, () => (hideLantern(true), later(1600, lanternTick)))
+      },
+      welcome: () => reactions.welcome?.(api),
+      caught: () => caught(true),
+      greet: () => (reactions.greet ?? greet)(api),
+      milestones: () => (reactions.milestone ?? celebrate)(Math.max(1, bond.days), api),
+      late: () => (emote('worried'), say(pick(L.late), { force: true })),
+      vigil: () => {
+        setVigil(true)
+        later(6000, readStatus)
+      },
+      knock: () => {
+        const tab = document.querySelector('[data-testid="sortable-tab"][data-active="true"]') ?? document.querySelector('[data-testid="sortable-tab"]')
+        if (!tab) return false
+        knockHold = Date.now() + 5500
+        visit(tab)
+        later(5600, () => mode === 'visiting' && visitingTab === tab && leaveVisit())
+      },
+      done: () => (twirl(), later(900, () => say(pick(L.done), { force: true }))),
+      droop: () => droop(),
+      speech: () => say(pick(L.idle) ?? pick(L.welcome), { force: true }),
+      sound: () => sound('welcome', 0.05, 0.11),
+      chime: () => sound('pet', 0.07, 0.1),
+      song: () => play('sing'),
+      name: () => say(CONFIG.withName(greetLine() ?? pick(L.welcome) ?? pick(L.idle), conf().you.name, true), { force: true })
+    }
+    const ownPreview = (rowId) => CONFIG.items(SECTIONS).find((i) => i.id === rowId)?.run
+    const previewOf = (rowId) => ownPreview(rowId) ?? previews[rowId]
+    // Settings changed (here or in another window): what is on screen follows them at once.
+    // Only a switch that just went off (or the sleep timing) changes what is on screen; a preview, a
+    // theme switch or another window's unrelated change leaves the pet alone.
+    let seen = conf()
+    const refresh = () => {
+      if (stopped || previewing()) return // picked up by the next change after the preview
+      const was = seen
+      const now = conf()
+      if (now === was) return
+      seen = now
+      const wentOff = (f) => was.features[f] !== false && now.features[f] === false
+      if (mode === 'following' && wentOff('follow')) stopFollow()
+      if (mode === 'hiding' && wentOff('seek')) endSeek()
+      if (reading && wentOff('read')) endReading()
+      if (!canSpeak()) hush()
+      if (playing && !canSound()) stopAudio(600)
+      if (wentOff('sleep') || was.freq.sleep !== now.freq.sleep) {
+        const at = lastActive
+        wake() // wakes it, or re-times the next nap
+        lastActive = at
+      }
+      if (wentOff('lantern')) lanternTick()
+      if (wentOff('vigil') || wentOff('knock')) readStatus()
+    }
+    addEventListener('orca-themer:state', refresh)
+    const panel = {
+      sections: SECTIONS,
+      defaults: BASE,
+      get: conf,
+      has: (rowId) => Boolean(previewOf(rowId)),
+      preview(rowId, from) {
+        const fn = previewOf(rowId)
+        if (stopped || !fn || !ready()) return false
+        previewUntil = Date.now() + 4000 // long enough for its own delayed line or chime
+        try {
+          return fn(ownPreview(rowId) ? api : from) !== false
+        } catch (error) {
+          console.warn(`[companion ${id}] preview ${rowId} failed`, error)
+          return false
+        }
+      },
+      stats: () => ({ days: bond.days, pets: bond.pets || 0, met: bond.met, celebrated: bond.celebrated.length }),
+      // Forgets the days together, the petting and the hours it learned; starts over today.
+      forget() {
+        bond = { met: today(), days: 0, last: '', hours: Array(24).fill(0), celebrated: [], lateWarned: '', said: { date: today(), n: 0 }, pets: 0 }
+        meetToday()
+        if (ready()) {
+          emote('curious')
+          acts.lookAround?.()
+        }
+      },
+      setSize(n) {
+        if (seek) return false
+        size = Math.min(2.5, Math.max(0.5, Number(n) || 1))
+        if (Math.abs(size - 1) < 0.04) size = 1
+        place(clamp(spot))
+        store(SIZE_KEY, String(size))
+        return true
+      },
+      resetHome() {
+        saved = null
+        try {
+          localStorage.removeItem(SPOT_KEY)
+        } catch {}
+        if (mode === 'home' && !drag) {
+          roaming = false
+          flyTo(homeSpot(), 900)
+        }
+      }
+    }
 
     // ---------- what character files and dev tools can use ----------
     const api = {
       id,
+      label: cfg.label ?? id,
+      drawing: cfg.svg, // the SVG markup as given (the live svg has its moving parts lifted out)
       host,
       root: home,
       svg,
@@ -2318,7 +2825,7 @@
       get bond() {
         return bond
       },
-      chime: (freqs, gain = 0.05, gap) => S && chime(freqs, gain * (S.gain ?? 1), gap),
+      chime: (freqs, gain = 0.05, gap) => S && canSound() && chime(freqs, gain * (S.gain ?? 1) * conf().sound.chime, gap),
       play,
       animateParts,
       openTab,
@@ -2347,7 +2854,15 @@
       lantern: (on = true) => (on ? (hideLantern(false), (bond.lanternDay = ''), lanternTick(true), true) : (hideLantern(true), true)),
       get lit() {
         return Boolean(lantern)
-      }
+      },
+      // The settings panel (companion_settings.js) and your own acts: is a row on, how often (a multiplier).
+      on,
+      freq,
+      get settings() {
+        return conf()
+      },
+      panel,
+      preview: (rowId, from) => panel.preview(rowId, from)
     }
     T.companions.set(id, api)
     meetToday()
@@ -2384,6 +2899,7 @@
       toasts.disconnect()
       statusObserver.disconnect()
       removeEventListener('resize', onResize)
+      removeEventListener('orca-themer:state', refresh)
       removeEventListener('orca-themer:combo', onCombo)
       removeEventListener('blur', onLeave)
       removeEventListener('focus', onBack)
