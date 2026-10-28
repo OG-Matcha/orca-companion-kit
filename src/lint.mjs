@@ -45,7 +45,8 @@ export function lintTouch(source, filename = 'touch.js') {
     const m = re.exec(code)
     if (m) issues.push({ level, line: lineOf(code, m.index), rule, message })
   }
-  if (!/registerTouch|registerCompanion|registerAttrTouch|registerPickerItem/.test(code))
+  // A shared module that other touches read (companion_emotion.js sets T.companionEmotion) registers nothing on purpose.
+  if (!/registerTouch|registerCompanion|registerAttrTouch|registerPickerItem/.test(code) && !/^\s*T\.[A-Za-z]\w* = /m.test(code))
     issues.push({ level: 'warn', line: 1, rule: 'no-register', message: 'registers nothing (call window.__orcaThemer.registerTouch or registerCompanion)' })
   // Esc interrupts Claude Code and other agents in the terminal; a touch must never take it.
   find(/['"`]Escape['"`]|['"`]Esc['"`]|keyCode\s*===?\s*27|which\s*===?\s*27/, 'error', 'esc-binding', 'binds Esc (it interrupts Claude Code in the terminal; use right-click or a click instead)')
