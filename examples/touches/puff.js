@@ -140,6 +140,10 @@
       // The built-in `chaseStar` fits a sheep less; take it out.
       chaseStar: null
     },
+    // Its own rows in the settings panel (right-click it, or Ctrl+Alt+T → 寵物設定). An act with the same
+    // name as a row follows that row's switch and frequency when it is picked idle; `preview` is what
+    // 「試試看」 plays.
+    behaviors: [{ id: 'puffUp', label: '蓬起毛', desc: '閒著的時候，偶爾把毛蓬起來再洩氣。', freq: true, preview: (api) => api.acts.puffUp() }],
     // Replaces the built-in "worried" reaction (a word like "bug" or "error" in what you sent).
     reactions: {
       worried: (api) => {
