@@ -8,13 +8,16 @@ import { execFileSync } from 'node:child_process'
 
 /** Orca's executable and its app.asar on this OS (and the .app bundle on macOS). */
 export function orcaInstall({ platform = process.platform, env = process.env, home = os.homedir(), exists = fs.existsSync } = {}) {
+  // Each OS's own path rules, so the answer does not depend on the OS the tests run on.
   if (platform === 'darwin') {
-    const candidates = env.ORCA_APP ? [env.ORCA_APP] : ['/Applications/Orca.app', path.join(home, 'Applications', 'Orca.app')]
+    const p = path.posix
+    const candidates = env.ORCA_APP ? [env.ORCA_APP] : ['/Applications/Orca.app', p.join(home, 'Applications', 'Orca.app')]
     const app = candidates.find((c) => exists(c)) ?? candidates[0]
-    return { app, exe: path.join(app, 'Contents', 'MacOS', 'Orca'), asar: path.join(app, 'Contents', 'Resources', 'app.asar') }
+    return { app, exe: p.join(app, 'Contents', 'MacOS', 'Orca'), asar: p.join(app, 'Contents', 'Resources', 'app.asar') }
   }
-  const dir = env.ORCA_DIR || path.join(env.LOCALAPPDATA ?? '', 'Programs', 'orca')
-  return { exe: path.join(dir, 'Orca.exe'), asar: path.join(dir, 'resources', 'app.asar') }
+  const w = path.win32
+  const dir = env.ORCA_DIR || w.join(env.LOCALAPPDATA ?? '', 'Programs', 'orca')
+  return { exe: w.join(dir, 'Orca.exe'), asar: w.join(dir, 'resources', 'app.asar') }
 }
 
 /**
@@ -51,6 +54,14 @@ export function runningOrcaMainPids(exe) {
   return out.split(/\s+/).filter(Boolean).map(Number)
 }
 
+// Windows: the main's own Orca.exe children (renderer, GPU, utility), but not its terminal host
+// (`daemon-entry`): that one keeps the agents and shells running across the restart.
+function windowsHelperPids(exe, mainPid) {
+  const script = `Get-CimInstance Win32_Process -Filter "Name='Orca.exe' and ParentProcessId=${Number(mainPid)}" | Where-Object { $_.ExecutablePath -eq '${exe.replace(/'/g, "''")}' -and $_.CommandLine -notmatch 'daemon-entry' } | ForEach-Object { $_.ProcessId }`
+  const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
+  return out.split(/\s+/).filter(Boolean).map(Number)
+}
+
 const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 
 /** Stops the Orca that runs without the pipe, so this one can start (Orca allows one instance). */
@@ -60,9 +71,14 @@ export function stopRunningOrca(exe, log = () => {}) {
     log('stopping running Orca main', pid)
     try {
       // macOS: SIGTERM lets Orca quit as it does on Cmd+Q; its terminal host is a separate process and stays.
-      // Windows keeps its forced tree kill.
+      // Windows: no tree kill (/T), which would also end the terminal host and every session in it.
       if (process.platform === 'darwin') process.kill(pid, 'SIGTERM')
-      else execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
+      else
+        for (const p of [pid, ...windowsHelperPids(exe, pid)]) {
+          try {
+            execFileSync('taskkill.exe', ['/PID', String(p), '/F'], { stdio: 'ignore' })
+          } catch {}
+        }
     } catch {}
   }
   if (!pids.length) return
