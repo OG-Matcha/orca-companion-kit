@@ -19,9 +19,9 @@ test('platform: macOS finds Orca in /Applications, then ~/Applications; ORCA_APP
 
 test('platform: Windows keeps the per-user install, ORCA_DIR overrides', () => {
   const win = orcaInstall({ platform: 'win32', env: { LOCALAPPDATA: 'L' } })
-  assert.equal(win.exe, path.join('L', 'Programs', 'orca', 'Orca.exe'))
-  assert.equal(win.asar, path.join('L', 'Programs', 'orca', 'resources', 'app.asar'))
-  assert.equal(orcaInstall({ platform: 'win32', env: { ORCA_DIR: 'D' } }).exe, path.join('D', 'Orca.exe'))
+  assert.equal(win.exe, path.win32.join('L', 'Programs', 'orca', 'Orca.exe'))
+  assert.equal(win.asar, path.win32.join('L', 'Programs', 'orca', 'resources', 'app.asar'))
+  assert.equal(orcaInstall({ platform: 'win32', env: { ORCA_DIR: 'D' } }).exe, path.win32.join('D', 'Orca.exe'))
 })
 
 test('platform: only the main Orca counts; helpers, asar scripts and trial runs do not', () => {
