@@ -12,11 +12,10 @@ export const FIXES = [claudeRestartFix]
  * Returns Map(asset file name -> patched source) for the enabled fixes that match this Orca build.
  * An enabled fix that no longer applies, fully or in part, adds a line to `warnings` for the update checkup.
  */
-export async function prepareFixes(orcaDir, enabledIds, log = () => {}, warnings = []) {
+export async function prepareFixes(asarFile, enabledIds, log = () => {}, warnings = []) {
   const served = new Map()
   const wanted = FIXES.filter((fix) => enabledIds.includes(fix.id))
   if (!wanted.length) return served
-  const asarFile = path.join(orcaDir, 'resources', 'app.asar')
   let asar
   let files
   try {

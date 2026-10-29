@@ -68,7 +68,7 @@ test('checkup: the page probe reports hooks and touch errors', async () => {
 })
 
 test('checkup: an enabled fix that cannot apply leaves a warning; a disabled one stays quiet', async () => {
-  const missing = path.join(os.tmpdir(), 'no-orca-here')
+  const missing = path.join(os.tmpdir(), 'no-orca-here', 'app.asar')
   const warnings = []
   assert.equal((await prepareFixes(missing, ['claude-restart-after-switch'], () => {}, warnings)).size, 0)
   assert.equal(warnings.length, 1)

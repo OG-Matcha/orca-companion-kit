@@ -63,6 +63,25 @@ npm run example        # 範例主題「棉花夜空」和範例寵物 Puff 放�
 
 還原：`.\uninstall.ps1` 會把捷徑換回原本的樣子；`~/.orca/themer` 裡的東西會留著。
 
+## 快速開始（macOS）
+
+需要 Node.js 20 以上，以及裝在 `/Applications` 或 `~/Applications` 的 Orca（其他位置：設定環境變數 `ORCA_APP`）。
+
+```sh
+git clone <this repo> orca-companion-kit
+cd orca-companion-kit
+npm install
+./install.sh           # 建立 ~/Applications/Orca Companion.app，點它就經由啟動器開 Orca
+npm run example        # 範例主題「棉花夜空」和範例寵物 Puff 放進 ~/.orca/themer
+```
+
+把 `Orca Companion.app` 拖到 Dock 取代原本的 Orca，之後都從它開。按 **⌃⌥T**（Control+Option+T），選「棉花夜空 Cotton Sky」。
+
+> 跟 Windows 一樣，啟動器會先關掉沒經過它開的 Orca 再重開（像按 ⌘Q 那樣結束，終端機的背景服務不受影響）。Orca 已經由啟動器開著時，再點一次只會把 Orca 叫到前面，不會重開。想先試試：
+> `node src/themer.mjs --user-data-dir=$TMPDIR/orca-trial`（不會關掉原本的 Orca）。
+
+還原：`./uninstall.sh` 刪掉 `Orca Companion.app`；`~/.orca/themer` 裡的東西會留著。
+
 ## 讓 AI 幫你做
 
 在這個資料夾開 Claude Code（或任何會讀 `AGENTS.md` 的 agent），說一聲：
@@ -122,4 +141,4 @@ npm run chime -- ~/.orca/themer/sounds/my-theme.wav 1046.5 1318.5
 npm install; .\install.ps1; npm run example   # then open Orca from its shortcut, Ctrl+Alt+T
 ```
 
-Open an agent in this folder and ask it to "make me an Orca theme and a desktop pet": `AGENTS.md` tells it how to interview you and what to generate. Drag the pet anywhere and drop it gently to give it a new home; the mouse wheel resizes it, and both are remembered. It has feelings that last: a mood (shown as a word; hold Alt for the number), affection in tiers of 20 that never drop below a tier once reached, closeness that only grows, plus anxiety and loneliness. Failures make it sad and anxious for the day, never less fond of you; days away cost at most 4; what really costs affection is Orca open all day with no attention. At rock bottom it sulks in a corner (once a day, can be switched off) until you pet it three times. The words and lines are per pet (`emotion.words`, `lines.low`, `lines.sulk`...). Right-click it (or Ctrl+Alt+T → 寵物設定) for its settings panel, whose first tab 心情 shows all this: every behaviour can be switched off or made rarer or more frequent, with a "try it" button, quiet hours, volume, your name and a reset; your own pet's behaviours join the panel through `behaviors` (row labels can be overridden, e.g. in English). Opt-in behaviours take one `true` each in the pet's config: hide-and-seek behind the window's edges (click it, then find it), a stamp on `git commit` and a paper plane on `git push`, being caught in the act when you come back after a while, a nuzzle when the pointer rests on it, reading along on Markdown tabs, an evening lantern, and singing your own audio file (dropped into `~/.orca/themer/assets/`, never bundled) on a word. Beyond the pet, you can write your own touches (any effect that runs in an Orca window), stackable CSS snippets and runtime fixes. API reference: `docs/companion-api.md`, `docs/touches.md`. Read `docs/performance.md` before writing any CSS or touch: each rule there comes from a measured slowdown in Orca. Windows only for now (the launcher and shortcut handling use Windows paths and PowerShell).
+Open an agent in this folder and ask it to "make me an Orca theme and a desktop pet": `AGENTS.md` tells it how to interview you and what to generate. Drag the pet anywhere and drop it gently to give it a new home; the mouse wheel resizes it, and both are remembered. It has feelings that last: a mood (shown as a word; hold Alt for the number), affection in tiers of 20 that never drop below a tier once reached, closeness that only grows, plus anxiety and loneliness. Failures make it sad and anxious for the day, never less fond of you; days away cost at most 4; what really costs affection is Orca open all day with no attention. At rock bottom it sulks in a corner (once a day, can be switched off) until you pet it three times. The words and lines are per pet (`emotion.words`, `lines.low`, `lines.sulk`...). Right-click it (or Ctrl+Alt+T → 寵物設定) for its settings panel, whose first tab 心情 shows all this: every behaviour can be switched off or made rarer or more frequent, with a "try it" button, quiet hours, volume, your name and a reset; your own pet's behaviours join the panel through `behaviors` (row labels can be overridden, e.g. in English). Opt-in behaviours take one `true` each in the pet's config: hide-and-seek behind the window's edges (click it, then find it), a stamp on `git commit` and a paper plane on `git push`, being caught in the act when you come back after a while, a nuzzle when the pointer rests on it, reading along on Markdown tabs, an evening lantern, and singing your own audio file (dropped into `~/.orca/themer/assets/`, never bundled) on a word. Beyond the pet, you can write your own touches (any effect that runs in an Orca window), stackable CSS snippets and runtime fixes. API reference: `docs/companion-api.md`, `docs/touches.md`. Read `docs/performance.md` before writing any CSS or touch: each rule there comes from a measured slowdown in Orca. Runs on Windows (`install.ps1`, Ctrl+Alt+T) and macOS (`./install.sh` makes `~/Applications/Orca Companion.app`; ⌃⌥T). The perf and live-check tools are still Windows only.

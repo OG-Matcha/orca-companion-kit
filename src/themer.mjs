@@ -5,7 +5,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { launchWithPipe } from './cdp-pipe.mjs'
@@ -13,13 +13,13 @@ import { composeCss, loadLibrary, publicState, companionConfig } from './themes.
 import { buildRuntimeSource } from './runtime-source.mjs'
 import { seedBundled } from './seed.mjs'
 import { prepareFixes } from './fixes/index.mjs'
+import { orcaInstall, orcaOwnedByLauncher, stopRunningOrca } from './platform.mjs'
 import { checkupDue, lastCheckedVersion, pageProbeExpression, readOrcaVersion, recordChecked, summarizeCheckup } from './checkup.mjs'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 const REPO = path.resolve(HERE, '..')
 const ROOT = process.env.ORCA_THEMER_ROOT || path.join(os.homedir(), '.orca', 'themer')
-const ORCA_DIR = process.env.ORCA_DIR || path.join(process.env.LOCALAPPDATA ?? '', 'Programs', 'orca')
-const ORCA_EXE = path.join(ORCA_DIR, 'Orca.exe')
+const { app: ORCA_APP, exe: ORCA_EXE, asar: ORCA_ASAR } = orcaInstall()
 const SETTINGS_FILE = path.join(ROOT, 'settings.json')
 const LOG_FILE = path.join(ROOT, 'themer.log')
 const USER_TOUCHES = path.join(ROOT, 'touches')
@@ -111,44 +111,29 @@ function pageScript() {
   return `if (/^file:\\/\\/\\/.*\\/out\\/renderer\\/[^/]+\\.html/i.test(location.href)) {\n${runtimeSource}\n;window.__orcaThemer?.apply(${JSON.stringify(payload())})\n}`
 }
 
-// ---------- Orca process ----------
-// An Orca started with its own --user-data-dir (a trial run, a recording) is a separate app and keeps running.
-function runningOrcaMainPids() {
-  const script = `Get-CimInstance Win32_Process -Filter "Name='Orca.exe'" | Where-Object { $_.ExecutablePath -eq '${ORCA_EXE.replace(/'/g, "''")}' -and $_.CommandLine -notmatch '--type=' -and $_.CommandLine -notmatch 'app\\.asar' -and $_.CommandLine -notmatch '--user-data-dir' } | ForEach-Object { $_.ProcessId }`
-  const out = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], { encoding: 'utf8' })
-  return out.split(/\s+/).filter(Boolean).map(Number)
-}
-
-function stopRunningOrca() {
-  const pids = runningOrcaMainPids()
-  for (const pid of pids) {
-    log('stopping running Orca main', pid)
-    try {
-      execFileSync('taskkill.exe', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' })
-    } catch {}
-  }
-  if (pids.length) {
-    const until = Date.now() + 15000
-    while (runningOrcaMainPids().length && Date.now() < until) execFileSync('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Milliseconds 300'])
-  }
-}
-
 // ---------- main ----------
 const forwardedArgs = process.argv.slice(2).filter((a) => !a.startsWith('--no-restart'))
 // A trial run with its own --user-data-dir is a second Orca and must not close the one you are using.
 const trialRun = forwardedArgs.some((a) => a.startsWith('--user-data-dir'))
 // Orca allows one instance: an Orca started without the pipe has to close before this one can start.
-if (!process.argv.includes('--no-restart') && !trialRun) stopRunningOrca()
+if (!process.argv.includes('--no-restart') && !trialRun) {
+  if (orcaOwnedByLauncher(ORCA_EXE)) {
+    log('Orca already runs through a launcher; bringing it forward instead of restarting it')
+    execFile('open', ['-a', ORCA_APP], () => process.exit(0))
+    await new Promise(() => {}) // the callback above exits
+  }
+  stopRunningOrca(ORCA_EXE, log)
+}
 // Enabled fixes that did not apply to this Orca build, for the update checkup.
 const fixWarnings = []
-const patchedAssets = await prepareFixes(ORCA_DIR, settings.enabledFixes ?? [], log, fixWarnings)
+const patchedAssets = await prepareFixes(ORCA_ASAR, settings.enabledFixes ?? [], log, fixWarnings)
 
 // ---------- update checkup ----------
 // Once per Orca version: do the fixes, the DOM hooks themes style and the touches still work? Silent
 // when they do; one notice in Orca when not, with the details in themer.log.
 const CHECKUP_FILE = path.join(ROOT, 'orca-version.json')
 const asarModule = (await import('@electron/asar').catch(() => null))?.default
-const orcaVersion = readOrcaVersion(asarModule, path.join(ORCA_DIR, 'resources', 'app.asar'))
+const orcaVersion = readOrcaVersion(asarModule, ORCA_ASAR)
 let checkupPending = checkupDue(lastCheckedVersion(CHECKUP_FILE), orcaVersion)
 let runtimeError = null // the first error the injected runtime threw, for the checkup
 log(`Orca ${orcaVersion ?? '(version unknown)'}${checkupPending ? ': new version, checkup after the window loads' : ''}`)
@@ -183,8 +168,10 @@ log('launched Orca pid', child.pid)
 
 // Orca's updater points the shortcuts back at Orca.exe, which would start it without the theme next time.
 // Skipped for test runs (a separate --user-data-dir, or ORCA_COMPANION_NO_SHORTCUTS=1) and before install.ps1
-// has made the launcher, so a trial run never rewrites anyone's shortcuts.
+// has made the launcher, so a trial run never rewrites anyone's shortcuts. Windows only: on macOS the
+// launcher is its own app (install.sh), which Orca's updater never touches.
 const manageShortcuts =
+  process.platform === 'win32' &&
   process.env.ORCA_COMPANION_NO_SHORTCUTS !== '1' &&
   !trialRun &&
   fs.existsSync(path.join(REPO, 'Orca Companion.vbs'))

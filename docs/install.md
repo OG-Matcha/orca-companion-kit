@@ -2,9 +2,10 @@
 
 ## 需求
 
-- Windows 10／11
+- Windows 10／11，或 macOS
 - Node.js 20 以上（`node -v`）
-- Orca 裝在預設位置 `%LOCALAPPDATA%\Programs\orca\Orca.exe`（其他位置：設定環境變數 `ORCA_DIR`）
+- Windows：Orca 裝在預設位置 `%LOCALAPPDATA%\Programs\orca\Orca.exe`（其他位置：設定環境變數 `ORCA_DIR`）
+- macOS：Orca 在 `/Applications/Orca.app` 或 `~/Applications/Orca.app`（其他位置：設定環境變數 `ORCA_APP`）
 
 ## 安裝
 
@@ -20,6 +21,24 @@ npm install
 3. 把桌面、開始選單、工作列上的 `Orca.lnk` 改成指向這個 `.vbs`，並把原本的捷徑備份到 `backup\`。
 
 之後照常從捷徑開 Orca 就好。
+
+## 安裝（macOS）
+
+```sh
+npm install
+./install.sh
+```
+
+`install.sh` 會建立 `~/Applications/Orca Companion.app`。它裡面只有一個 shell 腳本，用完整路徑呼叫 `node` 跑這個 repo 的 `src/themer.mjs`（從 Finder 或 Dock 開的 app 拿不到 Homebrew、nvm 的 PATH），所以 `git pull` 之後不用重裝；搬動 repo 或換了 Node 的位置才要重跑。
+
+- **從它開 Orca。** 把它拖到 Dock，取代原本的 Orca 圖示。它本身不佔 Dock 位置（`LSUIElement`），開起來看到的是 Orca 自己的圖示。
+- **沒有捷徑要管。** Orca 更新只會換掉 `Orca.app`，碰不到這個 app，所以 macOS 不需要 Windows 那套捷徑修復。
+- **再點一次不會重開。** Orca 已經經由管線開著時（不論是這個 kit 還是其他用 `--remote-debugging-pipe` 的工具開的），啟動器只會把 Orca 叫到前面就結束。
+- **關掉沒經過啟動器的 Orca 時**送的是 SIGTERM，跟 ⌘Q 一樣讓 Orca 自己結束；15 秒還沒結束才強制關閉。終端機的背景服務（`orca-terminal-host`）是獨立的程序，不受影響。
+
+快捷鍵是 **⌃⌥T**（Control+Option+T）。`npm run perf` 和 `npm run live-check` 目前只支援 Windows。
+
+解除安裝：`./uninstall.sh` 刪掉 `Orca Companion.app`，再把 Dock 上的圖示換回 Orca。
 
 ## 開機自動啟動
 
@@ -91,11 +110,11 @@ npm run guard
 
 | 症狀 | 處理 |
 | --- | --- |
-| 沒有主題 | 確認是從捷徑開的；看 `themer.log`；重跑 `install.ps1` |
-| 主題選單打不開 | Ctrl+Alt+T 被其他程式攔走了；Console 裡輸入 `__orcaThemer.openPicker()` |
+| 沒有主題 | 確認是從捷徑（macOS：`Orca Companion.app`）開的；看 `themer.log`；重跑 `install.ps1`／`install.sh` |
+| 主題選單打不開 | Ctrl+Alt+T（macOS：⌃⌥T）被其他程式攔走了；Console 裡輸入 `__orcaThemer.openPicker()` |
 | touch 沒出現 | 主題的 `@touches` 有沒有列它？選單裡有沒有勾？系統是否設定「減少動態」？`themer.log` 有沒有寫 `touch skipped`？ |
 | 打字變慢 | Ctrl+Alt+T →「效能」量一次；跑 `npm run check`；對照 [performance.md](performance.md) |
-| Orca 被關掉了 | 啟動器結束時 Orca 也會跟著關。不要結束 `orca-companion.exe` |
+| Orca 被關掉了 | 啟動器結束時 Orca 也會跟著關。不要結束 `orca-companion.exe`（macOS：跑 `src/themer.mjs` 的 node） |
 
 ## 解除安裝
 

@@ -13,6 +13,8 @@
   const touchErrors = [] // { id, error } for touches whose start() threw
   const pickerItems = new Map() // id -> { label, sub, when?, run }: extra rows (a pet's settings panel)
   let overlay = null // a panel opened from the picker: { isOpen, close }; Ctrl+Alt+T closes it
+  // The picker shortcut as macOS writes it (Control+Option+T), where the picker and notices name it.
+  const MAC = /Mac/.test(globalThis.navigator?.platform ?? '')
   // Pet settings changed in this window and not yet echoed back by the launcher: id -> { json, at }.
   // A broadcast sent before the launcher saw them carries older values and must not undo them.
   const pendingCompanions = new Map()
@@ -220,7 +222,7 @@
     root.innerHTML = `
       <div class="otp-scrim" data-close></div>
       <div class="otp-panel">
-        <div class="otp-head"><span>外觀</span><kbd>Ctrl Alt T</kbd></div>
+        <div class="otp-head"><span>外觀</span><kbd>${MAC ? '⌃⌥T' : 'Ctrl Alt T'}</kbd></div>
         <div class="otp-list" data-list></div>
         <div class="otp-foot">主題在 ~/.orca/themer/themes、小巧思在 ~/.orca/themer/touches，存檔就會即時套用</div>
       </div>`
@@ -243,7 +245,8 @@
   addEventListener(
     'keydown',
     (e) => {
-      if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === 't' || e.key === 'T')) {
+      // e.code too: on macOS, Option changes the character a key types ('†' for T on a US layout).
+      if (e.ctrlKey && e.altKey && !e.shiftKey && (e.key === 't' || e.key === 'T' || e.code === 'KeyT')) {
         e.preventDefault()
         e.stopPropagation()
         // The same shortcut closes a panel opened from the picker (a pet's settings).
@@ -288,7 +291,7 @@
       lag = slow >= strokes.length / 2
       if (lag && Date.now() - lagNoticeAt > 3600000) {
         lagNoticeAt = Date.now()
-        notice('打字變慢了。按 Ctrl+Alt+T，在「效能」可以找原因')
+        notice(`打字變慢了。按 ${MAC ? '⌃⌥T' : 'Ctrl+Alt+T'}，在「效能」可以找原因`)
         send({ type: 'log', message: `slow typing: ${slow}/${strokes.length} keystrokes over ${LAG_MS} ms` })
       }
     }).observe({ type: 'event', durationThreshold: 16 })
