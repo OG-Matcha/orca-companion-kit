@@ -36,6 +36,17 @@ const CASES = {
   c: { label: '主題，不開任何 touch', touches: [] }
 }
 if (opt('before')) CASES.a0 = { label: `同 a，程式碼取自 ${opt('before')}`, touches: allTouches, repo: path.resolve(opt('before')) }
+// A checkout without its dependencies installed only shows up as "did not come up", which reads like a
+// regression: say so before launching anything.
+if (opt('before')) {
+  const dir = path.resolve(opt('before'))
+  const want = Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')).dependencies ?? {})
+  const missing = want.filter((d) => !fs.existsSync(path.join(dir, 'node_modules', ...d.split('/'))))
+  if (missing.length) {
+    console.error(`--before ${dir} 缺少相依套件：${missing.join(', ')}；先在那裡 npm install`)
+    process.exit(2)
+  }
+}
 const cases = opt('cases', (opt('before') ? 'a0,' : '') + (study ? 'a,b,c' : 'a,b')).split(',')
 const reps = Number(opt('reps', study ? 3 : 1))
 const dur = {
