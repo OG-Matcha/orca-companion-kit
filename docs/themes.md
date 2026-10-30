@@ -144,3 +144,5 @@ npm run check
 ```
 
 它會檢查[效能守則](performance.md)、檔頭、`@touches` 裡的 id 有沒有對應的 touch 檔，以及終端機配色的格式。
+
+想直接用 CDP 把整套 CSS 丟進頁面做實驗（`CSS.createStyleSheet` → `setStyleSheetText`），見 [stylesheet-swap.md](stylesheet-swap.md)。
