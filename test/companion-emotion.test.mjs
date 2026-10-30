@@ -298,3 +298,158 @@ test('emotion: the panel view, the idle lean, and the save format read back the 
   }
   assert.equal(E.normalize({ aff: 999 }, T0).aff, 100)
 })
+
+// Ticks every minute from `from` for `mins` minutes (as companion.js does); `each(m, now)` runs before each
+// tick. Returns the lowest mood seen.
+function minutes(s, from, mins, { present = true, sinceTouch = 0, each = null } = {}) {
+  let lowest = s.mood
+  for (let m = 1; m <= mins; m++) {
+    const now = from + m * 60000
+    each?.(m, now)
+    E.tick(s, now, { present, sinceTouch })
+    lowest = Math.min(lowest, s.mood)
+  }
+  return lowest
+}
+const NINE = new Date(2026, 9, 1, 9).getTime() // 09:00: twenty hours before the next 05:00 roll
+
+test('emotion: every number stays inside 0..100, however hard it is pushed', () => {
+  const inRange = (s, why) => {
+    for (const k of ['mood', 'aff', 'close', 'anx', 'lone']) assert.ok(Number.isFinite(s[k]) && s[k] >= 0 && s[k] <= 100, `${why}: ${k} = ${s[k]}`)
+    const t = E.target(s)
+    assert.ok(t >= 0 && t <= 100, `${why}: target ${t}`)
+  }
+  // Everything bad at once: the target bottoms out at 0, never below.
+  const bad = E.create(NINE)
+  for (let i = 0; i < 200; i++) for (const k of ['fail', 'agentFail', 'ignored', 'bug', 'late']) E.event(bad, k, NINE)
+  assert.ok(bad.anx > 99 && bad.anx <= 100, `anxiety ${bad.anx}`)
+  assert.equal(E.target(bad), 0)
+  minutes(bad, NINE, 16 * 60, { sinceTouch: Infinity })
+  inRange(bad, 'all bad')
+  assert.equal(bad.lone, E.P.lonePresentCap, 'loneliness stops at its cap while you are here')
+  // Everything good at once: the target tops out at 100.
+  const good = E.create(NINE)
+  good.aff = 99.5
+  good.peakTier = 4
+  for (let i = 0; i < 50; i++) for (const k of E.EVENTS) if (!['fail', 'agentFail', 'ignored', 'bug', 'late', 'pass'].includes(k)) E.event(good, k, NINE, 3 * H)
+  assert.equal(E.target(good), 100)
+  minutes(good, NINE, 6 * 60)
+  inRange(good, 'all good')
+  // A gap of years, away the whole time.
+  const gone = E.create(NINE)
+  E.tick(gone, NINE + 1000 * DAY, { present: false })
+  inRange(gone, 'years away')
+  assert.equal(gone.lone, E.P.loneAwayCap)
+  // Hand-edited saves are pulled back into range.
+  const n = E.normalize({ mood: -50, anx: 500, lone: NaN, close: 1e9, aff: -3, awayLoss: -99 }, NINE)
+  assert.deepEqual([n.mood, n.anx, n.lone, n.close, n.aff, n.awayLoss], [0, 100, 0, 100, 0, E.P.awayCapTotal])
+})
+
+test('emotion: left alone, the mood drifts back to its usual level from either end', () => {
+  const usual = (s) => E.P.moodBase + (s.aff / 100) * E.P.affBonusToMood
+  for (const start of [0, 100]) {
+    const s = E.create(NINE)
+    s.mood = start
+    assert.ok(Math.abs(E.target(s) - usual(s)) < 1e-9, 'no moodlets, no worries: the target is the usual level')
+    const gap = Math.abs(start - usual(s))
+    minutes(s, NINE, 120)
+    const left = Math.abs(s.mood - usual(s)) / gap
+    assert.ok(left > 0.45 && left < 0.55, `from ${start}: about half the gap closes in two hours (${f1(left)} left)`)
+    assert.ok(start ? s.mood > usual(s) : s.mood < usual(s), 'it approaches without overshooting')
+    minutes(s, NINE + 120 * 60000, 14 * 60)
+    assert.ok(Math.abs(s.mood - usual(s)) < 0.5, `from ${start}: back to ${f1(usual(s))} by night (${f1(s.mood)})`)
+  }
+  // Anxiety halves every 90 minutes.
+  const calm = E.create(NINE)
+  calm.anx = 80
+  minutes(calm, NINE, 90)
+  assert.equal(f1(calm.anx), 40)
+  // A moodlet lifts it for its hours; afterwards both settle at the same usual level.
+  const twins = [E.create(NINE), E.create(NINE)]
+  for (const s of twins) (s.anx = 80), (s.mood = E.target(s))
+  E.event(twins[0], 'thanks', NINE)
+  for (const s of twins) minutes(s, NINE, 60)
+  assert.ok(twins[0].mood > twins[1].mood + 0.8, `thanked ${f1(twins[0].mood)} vs ${f1(twins[1].mood)}`)
+  for (const s of twins) minutes(s, NINE + H, 18 * 60)
+  assert.equal(twins[0].moodlets.length, 0, 'the moodlet has expired')
+  for (const s of twins) assert.ok(s.anx < 0.5 && Math.abs(s.mood - usual(s)) < 0.5, `settled at ${f1(s.mood)}`)
+  assert.ok(Math.abs(twins[0].mood - twins[1].mood) < 0.05)
+})
+
+test('emotion: a red afternoon sinks it under the sulk line; once a day; consoled, it climbs back', () => {
+  // A failure and an agent failure every 15 minutes, six hours long; you stay near (no loneliness).
+  const red = () => {
+    const s = E.create(NINE)
+    s.aff = 30
+    s.peakTier = 1
+    const lowest = minutes(s, NINE, 6 * 60, { each: (m, now) => m % 15 === 0 && (E.event(s, 'fail', now), E.event(s, 'agentFail', now)) })
+    return { s, lowest }
+  }
+  const sulkEnd = NINE + 6 * H
+  const { s, lowest } = red()
+  assert.ok(lowest < E.P.sulkBelow, `lowest ${f1(lowest)} under ${E.P.sulkBelow}`)
+  assert.equal(E.view(s, sulkEnd).sulkedToday, false)
+  assert.equal(s.aff, 30, 'failures never cost affection')
+  // companion.js books the day's sulk on the state; it survives a save and is cleared at 05:00.
+  s.today.sulked = true
+  const saved = E.normalize(JSON.parse(JSON.stringify(E.serialize(s, sulkEnd))), sulkEnd)
+  assert.equal(saved.today.sulked, true, 'reopening Orca the same day does not allow a second sulk')
+  assert.equal(E.view(saved, sulkEnd).sulkedToday, true)
+  // Three pats win it back; the model only hears 「comforted」 on the third.
+  const twin = red().s
+  twin.today.sulked = true
+  assert.equal(E.event(s, 'comforted', sulkEnd), true)
+  assert.ok(s.moodlets.some((m) => m.kind === 'comforted' && m.v === E.ML.comforted[0]))
+  assert.ok(s.today.interacted && !twin.today.interacted, 'being consoled counts as time together')
+  minutes(s, sulkEnd, 3.5 * 60)
+  minutes(twin, sulkEnd, 3.5 * 60)
+  assert.ok(s.mood > twin.mood + 4, `consoled ${f1(s.mood)} vs left alone ${f1(twin.mood)}`)
+  assert.ok(s.mood > E.P.sulkBelow, `back above the sulk line (${f1(s.mood)})`)
+  // Next morning: a fresh day may sulk again; the consoled day was a day together, the other a quiet one.
+  const morning = NINE + 21 * H // 06:00
+  E.tick(s, morning, { present: true })
+  E.tick(twin, morning, { present: true })
+  assert.equal(s.today.sulked, false)
+  assert.equal(twin.today.sulked, false)
+  assert.ok(s.aff > 30 && s.close > 0, `consoled: ${f1(s.aff)}`)
+  assert.equal(f1(twin.aff), 29.4, 'Orca open all day without a touch: the quiet-day cost')
+})
+
+test('emotion: a pet that leaves out a field (or gets one wrong) keeps the default for it', () => {
+  const same = (W, keys) => {
+    for (const k of keys) assert.deepEqual(JSON.parse(JSON.stringify(W[k])), JSON.parse(JSON.stringify(E.WORDS[k])), k)
+  }
+  const all = ['tiers', 'stages', 'moods', 'anxious', 'lonely', 'moodlets', 'calm', 'tired', 'missed', 'nothing']
+  same(E.words({}), all)
+  same(E.words(undefined), all)
+  // Only tiers given: everything else stays the engine's.
+  const onlyTiers = E.words({ tiers: ['一', '二', '三', '四', '五'] })
+  assert.equal(E.tierName(85, onlyTiers), '五')
+  same(onlyTiers, all.filter((k) => k !== 'tiers'))
+  assert.equal(E.moodWord(60, onlyTiers), '平靜')
+  // Only some moodlets: the rest keep their labels; too long or not a string keeps the default.
+  const some = E.words({ moodlets: { pet: '呼嚕', fail: 'x'.repeat(25), thanks: 3 } })
+  assert.equal(some.moodlets.pet, '呼嚕')
+  for (const k of ['fail', 'thanks', 'reunion']) assert.equal(some.moodlets[k], E.WORDS.moodlets[k], k)
+  // Wrong length, a hole in a list, a blank or over-long sentence: each field falls back on its own.
+  const W = E.words({
+    anxious: [[0, '怕']],
+    lonely: [[0, '想'], [0, ''], [0, '摸']],
+    stages: [[0, 'a'], [0, 'b'], [0, 'c'], [0, 'd'], [0, 'e']],
+    calm: '',
+    tired: 'y'.repeat(61),
+    missed: '想你。'
+  })
+  same(W, ['anxious', 'lonely', 'calm', 'tired', 'nothing', 'tiers', 'moods', 'moodlets'])
+  assert.equal(E.stageName(80, W), 'a', 'a complete list is used, with the engine thresholds')
+  assert.equal(W.missed, '想你。')
+  assert.equal(E.anxWord(80, W), '很不安')
+  assert.equal(E.loneWord(65, W), '好想你')
+  assert.ok(Object.isFrozen(W) && Object.isFrozen(E.WORDS))
+  // The view labels with the pet's words and falls back for the rest.
+  const s = E.create(NINE)
+  E.event(s, 'pet', NINE)
+  E.event(s, 'thanks', NINE)
+  const labels = Object.fromEntries(E.view(s, NINE, some).moodlets.map((m) => [m.kind, m.label]))
+  assert.deepEqual(labels, { pet: '呼嚕', thanks: E.WORDS.moodlets.thanks })
+})
