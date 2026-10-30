@@ -960,6 +960,7 @@
     // before it had feelings starts at affection 60, the days together counted toward closeness.
     const EM = cfg.emotion === false ? null : T.companionEmotion ?? null
     const EW = EM?.words(cfg.emotion?.words)
+    const ES = EM?.speed?.(cfg.emotion?.transitionSpeed) ?? null // how fast the mood moves up / down; null: one pace
     let emo = EM ? (bond.emo ? EM.normalize(bond.emo) : EM.migrate(bond)) : null
     const saveBond = () => {
       if (emo) bond.emo = EM.serialize(emo)
@@ -1830,12 +1831,12 @@
       const now = Date.now()
       const tierBefore = EM.tierIndex(emo.aff)
       const bandBefore = EM.moodBand(emo.mood)[0]
-      EM.tick(emo, now, { present: hereNow(), sinceTouch: now - lastTouch })
+      EM.tick(emo, now, { present: hereNow(), sinceTouch: now - lastTouch, speed: ES })
       saveBond()
       applyFeelings(tierBefore, bandBefore)
     }
     if (emo) {
-      EM.tick(emo, Date.now(), { present: !away(), sinceTouch: Infinity }) // quietly: the welcome is greet's
+      EM.tick(emo, Date.now(), { present: !away(), sinceTouch: Infinity, speed: ES }) // quietly: the welcome is greet's
       saveBond()
     }
     const emoTimer = emo ? setInterval(emoTick, 60000) : 0

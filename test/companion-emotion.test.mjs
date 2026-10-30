@@ -301,17 +301,63 @@ test('emotion: the panel view, the idle lean, and the save format read back the 
 
 // Ticks every minute from `from` for `mins` minutes (as companion.js does); `each(m, now)` runs before each
 // tick. Returns the lowest mood seen.
-function minutes(s, from, mins, { present = true, sinceTouch = 0, each = null } = {}) {
+function minutes(s, from, mins, { present = true, sinceTouch = 0, each = null, speed = null } = {}) {
   let lowest = s.mood
   for (let m = 1; m <= mins; m++) {
     const now = from + m * 60000
     each?.(m, now)
-    E.tick(s, now, { present, sinceTouch })
+    E.tick(s, now, { present, sinceTouch, speed })
     lowest = Math.min(lowest, s.mood)
   }
   return lowest
 }
 const NINE = new Date(2026, 9, 1, 9).getTime() // 09:00: twenty hours before the next 05:00 roll
+
+test('emotion: transitionSpeed: joy fast, frustration medium, sadness slow; unset keeps the one pace', () => {
+  // One hour of drift, no moodlets: how much of the gap to the target closes.
+  const closed = (mood, anx, sp) => {
+    const s = E.create(NINE)
+    s.mood = mood
+    s.anx = anx
+    const t0 = E.target({ ...s, anx: anx * Math.pow(0.5, 60 / E.P.anxHalfMin) }) // decay eases the anxiety first
+    E.decay(s, NINE, 1, { present: true, idle: false, speed: sp })
+    return (s.mood - mood) / (t0 - mood)
+  }
+  const p = E.P.moodPullPerHour // 0.3
+  // Not set (or set to something meaningless): the old single pace, in every direction.
+  for (const sp of [undefined, null, false, 0, 'fast', [1, 2, 3]]) assert.equal(E.speed(sp), null, String(sp))
+  for (const [mood, anx] of [[20, 0], [95, 0], [95, 80]]) assert.equal(f1(closed(mood, anx, null)), f1(p))
+  // true: the defaults. Rising → happy ×2; falling while anxious → angry ×1; falling → sad ×0.5.
+  const def = E.speed(true)
+  assert.deepEqual({ ...def }, { happy: 2, angry: 1, sad: 0.5 })
+  assert.equal(closed(20, 0, def).toFixed(4), (p * 2).toFixed(4), 'happy: 60 % of the gap in an hour')
+  assert.equal(closed(95, 80, def).toFixed(4), (p * 1).toFixed(4), 'angry: 30 %, as before')
+  assert.equal(closed(95, 0, def).toFixed(4), (p * 0.5).toFixed(4), 'sad: 15 %')
+  const kind = (mood, anx) => E.transitionKind(Object.assign(E.create(NINE), { mood, anx }))
+  assert.deepEqual([kind(20, 0), kind(95, 80), kind(95, 0)], ['happy', 'angry', 'sad'])
+  // A pet's own numbers over the defaults; out of 0.1..3 or not a number keeps the default.
+  const own = E.speed({ happy: 3, sad: 0.2, angry: 9 })
+  assert.deepEqual({ ...own }, { happy: 3, angry: 1, sad: 0.2 })
+  assert.deepEqual({ ...E.speed({ happy: NaN, angry: '2', sad: 0.05 }) }, { ...E.TRANSITION })
+  assert.ok(Object.isFrozen(own) && Object.isFrozen(E.TRANSITION))
+  assert.equal(closed(95, 0, own).toFixed(4), (p * 0.2).toFixed(4))
+  // Through tick (as companion.js calls it): a happy pet climbs faster and a sad one sinks slower than before.
+  const climb = (sp) => {
+    const s = E.create(NINE)
+    s.mood = 20
+    minutes(s, NINE, 60, { speed: sp })
+    return s.mood
+  }
+  const sink = (sp) => {
+    const s = E.create(NINE)
+    s.mood = 95
+    minutes(s, NINE, 60, { speed: sp })
+    return s.mood
+  }
+  assert.ok(climb(def) > climb(null) + 5, `climb ${f1(climb(def))} vs ${f1(climb(null))}`)
+  assert.ok(sink(def) > sink(null) + 3, `sink ${f1(sink(def))} vs ${f1(sink(null))}`)
+  for (const v of [climb(def), sink(def)]) assert.ok(v >= 0 && v <= 100)
+})
 
 test('emotion: every number stays inside 0..100, however hard it is pushed', () => {
   const inRange = (s, why) => {

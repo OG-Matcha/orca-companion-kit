@@ -104,6 +104,28 @@
   })
   const FAILS = ['fail', 'agentFail']
 
+  // ---------- how fast the mood moves (opt-in: registerCompanion({ emotion: { transitionSpeed } })) ----------
+  // Joy shows quickly, frustration at an ordinary pace, sadness settles in slowly. Multipliers of
+  // moodPullPerHour, picked by where the mood is heading: up → happy; down while anxious → angry; down → sad.
+  // Not set: one speed for everything, as before.
+  const TRANSITION = Object.freeze({ happy: 2, angry: 1, sad: 0.5 })
+  const SPEED_MIN = 0.1
+  const SPEED_MAX = 3
+  // A pet's setting → frozen { happy, angry, sad } or null. true: the defaults; an object: its valid numbers
+  // over the defaults (0.1..3; anything else keeps the default); anything else: null (the old single speed).
+  function speed(custom) {
+    if (custom === true) return TRANSITION
+    if (!custom || typeof custom !== 'object' || Array.isArray(custom)) return null
+    const out = { ...TRANSITION }
+    for (const k of Object.keys(TRANSITION)) {
+      const v = custom[k]
+      if (typeof v === 'number' && Number.isFinite(v) && v >= SPEED_MIN && v <= SPEED_MAX) out[k] = v
+    }
+    return Object.freeze(out)
+  }
+  const transitionKind = (s) => (target(s) >= s.mood ? 'happy' : s.anx >= P.anxiousAt ? 'angry' : 'sad')
+  const pullPerHour = (s, sp) => (sp ? Math.min(0.95, P.moodPullPerHour * sp[transitionKind(s)]) : P.moodPullPerHour)
+
   // ---------- words: every one can be replaced per pet (registerCompanion({ emotion: { words } })) ----------
   const WORDS = Object.freeze({
     tiers: ['初識', '熟悉', '信賴', '知心', '最要好'], // affection: < 20, 20, 40, 60, 80
@@ -372,13 +394,14 @@
   }
 
   // Passive change over `h` hours. present: you are at Orca. idle: no touch for a long while.
-  function decay(s, now, h, { present, idle }) {
+  // speed: from speed() (null: the one default pace).
+  function decay(s, now, h, { present, idle, speed: sp = null }) {
     s.moodlets = s.moodlets.filter((m) => m.until > now)
     s.anx *= Math.pow(0.5, (h * 60) / P.anxHalfMin)
     if (s.anx < 0.01) s.anx = 0
     if (present && idle) s.lone = Math.min(P.lonePresentCap, s.lone + P.lonePresentPerHour * h)
     if (!present && s.lone < P.loneAwayCap) s.lone = Math.min(P.loneAwayCap, s.lone + P.loneAwayPerHour * h)
-    s.mood = clamp(s.mood + (target(s) - s.mood) * (1 - Math.pow(1 - P.moodPullPerHour, h)))
+    s.mood = clamp(s.mood + (target(s) - s.mood) * (1 - Math.pow(1 - pullPerHour(s, sp), h)))
   }
   // The day is over (05:00). present: Orca was open with you around that day; interacted: you touched it.
   function dayEnd(s, present, interacted) {
@@ -400,21 +423,21 @@
   }
   // Time passed: called every minute while the pet is on screen, and once at start-up to catch up on the
   // time Orca was closed (days are rolled one by one; a long gap counts as time away).
-  // ctx.present: you are here now. ctx.sinceTouch: ms since you last touched it.
-  function tick(s, now = Date.now(), { present = false, sinceTouch = Infinity } = {}) {
+  // ctx.present: you are here now. ctx.sinceTouch: ms since you last touched it. ctx.speed: from speed().
+  function tick(s, now = Date.now(), { present = false, sinceTouch = Infinity, speed: sp = null } = {}) {
     let cursor = s.lastTick
     const out = { rolled: 0, returned: false }
     if (now <= cursor) return out
     const wasAway = now - cursor > 10 * 60000 // nobody ticks for ten minutes while Orca is open
     const idle = sinceTouch > P.loneIdleMs
     for (let roll = nextRoll(cursor); roll <= now; roll = nextRoll(roll)) {
-      decay(s, roll, (roll - cursor) / H, { present: !wasAway && present, idle })
+      decay(s, roll, (roll - cursor) / H, { present: !wasAway && present, idle, speed: sp })
       dayEnd(s, s.today.present, s.today.interacted)
       s.today = freshDay(dayKey(new Date(roll)))
       out.rolled++
       cursor = roll
     }
-    decay(s, now, (now - cursor) / H, { present: !wasAway && present, idle })
+    decay(s, now, (now - cursor) / H, { present: !wasAway && present, idle, speed: sp })
     s.lastTick = now
     if (present) {
       // The first time today after a day or more away: it stops missing you; after three, a reunion.
@@ -473,5 +496,5 @@
     }
   }
 
-  T.companionEmotion = { P, ML, WORDS, words, create, migrate, normalize, serialize, event, tick, dayEnd, decay, view, lean, target, tierIndex, tierName, tierFloor, stageName, nextStage, moodWord, moodBand, anxWord, loneWord, nextRoll, dayKey, EVENTS: Object.keys(EVENTS) }
+  T.companionEmotion = { P, ML, WORDS, TRANSITION, words, speed, transitionKind, create, migrate, normalize, serialize, event, tick, dayEnd, decay, view, lean, target, tierIndex, tierName, tierFloor, stageName, nextStage, moodWord, moodBand, anxWord, loneWord, nextRoll, dayKey, EVENTS: Object.keys(EVENTS) }
 })()

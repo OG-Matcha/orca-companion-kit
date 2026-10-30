@@ -95,7 +95,7 @@
 | `bubbleStyle` | string | 附加在對話框上的 CSS |
 | `behaviors` | `[{ id, label, desc, section?, freq?, default?, preview? }]` | 寵物自己的行為，會出現在設定面板，見下方「設定面板」 |
 | `sections` | `[{ id, label, intro }]` | 設定面板新增的分頁，給 `behaviors` 的 `section` 用 |
-| `emotion` | `{ words }` \| false | 心情用的字（好感階段、親密階段、心情、想著的事），見下方[心情](#心情)；`false` 表示這隻寵物沒有心情系統，也沒有「心情」分頁 |
+| `emotion` | `{ words, transitionSpeed }` \| false | 心情用的字（好感階段、親密階段、心情、想著的事）和心情變化的快慢，見下方[心情](#心情)；`false` 表示這隻寵物沒有心情系統，也沒有「心情」分頁 |
 | `onStart(api)` / `onStop(api)` | function | 啟動和停止時各呼叫一次。自己加的監聽器請在 `onStop` 移除 |
 
 ### 部位 `parts`
@@ -237,7 +237,24 @@ emotion: {
 }
 ```
 
-陣列的長度要和預設一樣，格式不對的那一項會用預設值。調參數、模擬 30 天的測試在 `test/companion-emotion.test.mjs`（重度使用者 30 天到不了 80、離開兩週最多扣 4、一天出錯十次隔天就恢復……）。
+陣列的長度要和預設一樣，格式不對的那一項會用預設值。
+
+**心情變化的快慢（`transitionSpeed`，可選）。** 開心通常來得快，難過則是慢慢沉下去。設了 `transitionSpeed`，心情往目標靠的速度會依方向分成三檔，數字是乘在預設速度（約 2 小時拉近一半）上的倍數：
+
+| 檔 | 什麼時候 | 預設 | 一小時拉近 |
+| --- | --- | --- | --- |
+| `happy` | 心情往上走 | 2 | 六成 |
+| `angry` | 心情往下走，而且不安在 50 以上（出錯、卡住時的煩躁） | 1 | 三成，和原本一樣 |
+| `sad` | 心情往下走，沒有不安 | 0.5 | 一成半 |
+
+```js
+emotion: { transitionSpeed: true }                          // 用上面的預設三檔
+emotion: { transitionSpeed: { happy: 3, sad: 0.3 } }        // 只改其中幾檔，其餘用預設
+```
+
+每一檔的值要在 0.1–3 之間，超出或不是數字的那一檔用預設。沒設（或設成 `false`）就是原本的行為：上下都同一個速度。
+
+調參數、模擬 30 天的測試在 `test/companion-emotion.test.mjs`（重度使用者 30 天到不了 80、離開兩週最多扣 4、一天出錯十次隔天就恢復……）。
 
 ## 設定面板
 
