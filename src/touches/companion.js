@@ -961,6 +961,7 @@
     const EM = cfg.emotion === false ? null : T.companionEmotion ?? null
     const EW = EM?.words(cfg.emotion?.words)
     const ES = EM?.speed?.(cfg.emotion?.transitionSpeed) ?? null // how fast the mood moves up / down; null: one pace
+    const EF = EM?.fade?.(cfg.emotion?.fadeBias) ?? null // bad moments wear off faster than good ones; null: their own hours
     let emo = EM ? (bond.emo ? EM.normalize(bond.emo) : EM.migrate(bond)) : null
     const saveBond = () => {
       if (emo) bond.emo = EM.serialize(emo)
@@ -1804,7 +1805,7 @@
     const applyFeelings = (tierBefore = null, bandBefore = null) => {
       if (stopped || !emo) return
       const now = Date.now()
-      const v = EM.view(emo, now, EW)
+      const v = EM.view(emo, now, EW, EF)
       setLow(v.mood < EM.P.lowBelow && !sulking)
       if (v.mood < EM.P.lowBelow && bandBefore != null && bandBefore >= EM.P.lowBelow && lowSaidDay !== EM.dayKey()) {
         lowSaidDay = EM.dayKey()
@@ -1831,12 +1832,12 @@
       const now = Date.now()
       const tierBefore = EM.tierIndex(emo.aff)
       const bandBefore = EM.moodBand(emo.mood)[0]
-      EM.tick(emo, now, { present: hereNow(), sinceTouch: now - lastTouch, speed: ES })
+      EM.tick(emo, now, { present: hereNow(), sinceTouch: now - lastTouch, speed: ES, fade: EF })
       saveBond()
       applyFeelings(tierBefore, bandBefore)
     }
     if (emo) {
-      EM.tick(emo, Date.now(), { present: !away(), sinceTouch: Infinity, speed: ES }) // quietly: the welcome is greet's
+      EM.tick(emo, Date.now(), { present: !away(), sinceTouch: Infinity, speed: ES, fade: EF }) // quietly: the welcome is greet's
       saveBond()
     }
     const emoTimer = emo ? setInterval(emoTick, 60000) : 0
@@ -3138,7 +3139,7 @@
       // watched; tick() runs the minute tick now; sulk()/consoled() play the sulk.
       emotion: emo
         ? {
-            view: () => emo && EM.view(emo, Date.now(), EW),
+            view: () => emo && EM.view(emo, Date.now(), EW, EF),
             event: (kind, arg) => {
               const tierBefore = EM.tierIndex(emo.aff)
               const ok = emoEvent(kind, arg)
@@ -3150,9 +3151,9 @@
               for (const k of ['mood', 'aff', 'close', 'anx', 'lone']) if (typeof part?.[k] === 'number' && Number.isFinite(part[k])) emo[k] = Math.max(0, Math.min(100, part[k]))
               if (part?.sulkedToday === false) emo.today.sulked = false
               saveBond()
-              return EM.view(emo, Date.now(), EW)
+              return EM.view(emo, Date.now(), EW, EF)
             },
-            tick: () => (emoTick(), EM.view(emo, Date.now(), EW)),
+            tick: () => (emoTick(), EM.view(emo, Date.now(), EW, EF)),
             sulk: () => sulk(true),
             consoled: () => Boolean(sulking) && (endSulk('consoled'), true),
             get sulking() {

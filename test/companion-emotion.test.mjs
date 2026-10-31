@@ -301,12 +301,12 @@ test('emotion: the panel view, the idle lean, and the save format read back the 
 
 // Ticks every minute from `from` for `mins` minutes (as companion.js does); `each(m, now)` runs before each
 // tick. Returns the lowest mood seen.
-function minutes(s, from, mins, { present = true, sinceTouch = 0, each = null, speed = null } = {}) {
+function minutes(s, from, mins, { present = true, sinceTouch = 0, each = null, speed = null, fade = null } = {}) {
   let lowest = s.mood
   for (let m = 1; m <= mins; m++) {
     const now = from + m * 60000
     each?.(m, now)
-    E.tick(s, now, { present, sinceTouch, speed })
+    E.tick(s, now, { present, sinceTouch, speed, fade })
     lowest = Math.min(lowest, s.mood)
   }
   return lowest
@@ -357,6 +357,67 @@ test('emotion: transitionSpeed: joy fast, frustration medium, sadness slow; unse
   assert.ok(climb(def) > climb(null) + 5, `climb ${f1(climb(def))} vs ${f1(climb(null))}`)
   assert.ok(sink(def) > sink(null) + 3, `sink ${f1(sink(def))} vs ${f1(sink(null))}`)
   for (const v of [climb(def), sink(def)]) assert.ok(v >= 0 && v <= 100)
+})
+
+test('emotion: fadeBias: a bad moment wears off sooner than a good one, and the mood is back sooner', () => {
+  const fd = E.fade(true)
+  assert.deepEqual({ ...fd }, { negative: 1.5, positive: 1 })
+  assert.ok(Object.isFrozen(fd) && Object.isFrozen(E.FADE))
+  // One ignored (−8, 3 h) and one asked (+10, 4 h) at 09:00, then a minute tick.
+  const after = (fade, mins) => {
+    const s = E.create(NINE)
+    s.mood = E.P.moodBase
+    E.event(s, 'ignored', NINE)
+    E.event(s, 'asked', NINE)
+    minutes(s, NINE, mins, { fade })
+    return s
+  }
+  const has = (s, kind) => s.moodlets.some((m) => m.kind === kind)
+  // 2 h 10 min in: on the faster clock the ignored one is gone (3 h ÷ 1.5 = 2 h); the asked one is untouched.
+  assert.ok(!has(after(fd, 130), 'ignored') && has(after(fd, 130), 'asked'))
+  assert.ok(has(after(null, 130), 'ignored'))
+  assert.equal(after(fd, 130).moodlets.find((m) => m.kind === 'asked').until, NINE + 4 * H)
+  // The panel's minutes left are real minutes.
+  const v = E.view(after(fd, 60), NINE + 60 * 60000, E.WORDS, fd)
+  assert.equal(v.moodlets.find((m) => m.kind === 'ignored').leftMin, 60)
+  assert.equal(v.moodlets.find((m) => m.kind === 'asked').leftMin, 180)
+  // A sad pet climbs back toward its usual mood faster.
+  const back = (fade) => {
+    const s = E.create(NINE)
+    s.mood = E.P.moodBase
+    for (let i = 0; i < 2; i++) E.event(s, 'ignored', NINE)
+    minutes(s, NINE, 60, { sinceTouch: 0 })
+    const low = s.mood
+    minutes(s, NINE + H, 150, { fade })
+    return { low, end: s.mood }
+  }
+  const [slow, quick] = [back(null), back(fd)]
+  assert.ok(quick.end > slow.end + 2, `quick ${f1(quick.end)} vs ${f1(slow.end)} (from ${f1(slow.low)})`)
+  // Over a long catch-up (Orca closed) the faster clock is exact too: nothing lingers past its share.
+  const s = E.create(NINE)
+  E.event(s, 'late', NINE) // −5 until 05:00: 20 h, 13 h 20 min on the faster clock
+  E.tick(s, NINE + 13 * H, { fade: fd })
+  assert.ok(has(s, 'late'))
+  E.tick(s, NINE + 14 * H, { fade: fd })
+  assert.ok(!has(s, 'late'))
+  // A pet's own numbers over the defaults (0.1..3, anything else keeps the default).
+  assert.deepEqual({ ...E.fade({ negative: 2, positive: 0.5 }) }, { negative: 2, positive: 0.5 })
+  assert.deepEqual({ ...E.fade({ negative: 9, positive: 'x' }) }, { ...E.FADE })
+})
+
+test('emotion: fadeBias not set: every moodlet lasts its own hours, exactly as before', () => {
+  for (const f of [undefined, null, false, 0, 'fast', [1.5, 1]]) assert.equal(E.fade(f), null, String(f))
+  const day = (fade) => {
+    const s = E.create(NINE)
+    for (const k of ['ignored', 'fail', 'asked', 'pet', 'late']) E.event(s, k, NINE)
+    const trace = []
+    minutes(s, NINE, 6 * 60, { each: (m) => m % 30 === 0 && trace.push(s.mood), ...(fade === undefined ? {} : { fade }) })
+    return { trace, saved: E.serialize(s, NINE + 6 * H), view: E.view(s, NINE + 6 * H, E.WORDS, fade ?? null).moodlets }
+  }
+  const before = day(undefined)
+  assert.deepEqual(day(null), before)
+  // Rates of 1 on both sides are the same as not set.
+  assert.deepEqual(day(E.fade({ negative: 1, positive: 1 })), before)
 })
 
 test('emotion: every number stays inside 0..100, however hard it is pushed', () => {

@@ -95,7 +95,7 @@
 | `bubbleStyle` | string | 附加在對話框上的 CSS |
 | `behaviors` | `[{ id, label, desc, section?, freq?, default?, preview? }]` | 寵物自己的行為，會出現在設定面板，見下方「設定面板」 |
 | `sections` | `[{ id, label, intro }]` | 設定面板新增的分頁，給 `behaviors` 的 `section` 用 |
-| `emotion` | `{ words, transitionSpeed }` \| false | 心情用的字（好感階段、親密階段、心情、想著的事）和心情變化的快慢，見下方[心情](#心情)；`false` 表示這隻寵物沒有心情系統，也沒有「心情」分頁 |
+| `emotion` | `{ words, transitionSpeed, fadeBias }` \| false | 心情用的字（好感階段、親密階段、心情、想著的事）、心情變化的快慢和不開心的事淡得多快，見下方[心情](#心情)；`false` 表示這隻寵物沒有心情系統，也沒有「心情」分頁 |
 | `onStart(api)` / `onStop(api)` | function | 啟動和停止時各呼叫一次。自己加的監聽器請在 `onStop` 移除 |
 
 ### 部位 `parts`
@@ -253,6 +253,15 @@ emotion: { transitionSpeed: { happy: 3, sad: 0.3 } }        // 只改其中幾�
 ```
 
 每一檔的值要在 0.1–3 之間，超出或不是數字的那一檔用預設。沒設（或設成 `false`）就是原本的行為：上下都同一個速度。
+
+**不開心的事淡得快（`fadeBias`，可選）。** 人通常比較快忘掉不愉快、開心的事留得久。設了 `fadeBias`，牠正在想的事（被晾著、出錯、熬夜……）會依好壞用不同速度淡掉，數字是時間流逝的倍數：`negative`（不開心的事，預設 1.5：3 小時的事 2 小時就淡掉）、`positive`（開心的事，預設 1，和原本一樣）。不開心的事一淡掉，心情也就早一點回到平常。
+
+```js
+emotion: { fadeBias: true }                                 // 不開心的事 1.5 倍速淡掉
+emotion: { fadeBias: { negative: 2, positive: 0.8 } }       // 壞事更快淡，好事留更久
+```
+
+值要在 0.1–3 之間，超出或不是數字的用預設。沒設（或設成 `false`）就是原本的行為：每件事都照它自己的時數。設定面板上「還剩多久」顯示的是實際的分鐘數。可以和 `transitionSpeed` 一起用：這個管「事情留多久」，那個管「心情往目標靠多快」。
 
 調參數、模擬 30 天的測試在 `test/companion-emotion.test.mjs`（重度使用者 30 天到不了 80、離開兩週最多扣 4、一天出錯十次隔天就恢復……）。
 

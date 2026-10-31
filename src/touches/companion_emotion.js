@@ -123,6 +123,23 @@
     }
     return Object.freeze(out)
   }
+  // ---------- how fast moodlets wear off (opt-in: registerCompanion({ emotion: { fadeBias } })) ----------
+  // The fading affect bias: the sting of a bad moment fades sooner than the glow of a good one. Rates of a
+  // moodlet's clock, by its sign: 1.5 means a negative moodlet's hours run 1.5× as fast (a 3 h one is gone in
+  // 2 h). Not set: every moodlet lasts its own hours, as before.
+  const FADE = Object.freeze({ negative: 1.5, positive: 1 })
+  // A pet's setting → frozen { negative, positive } or null, read the same way as speed().
+  function fade(custom) {
+    if (custom === true) return FADE
+    if (!custom || typeof custom !== 'object' || Array.isArray(custom)) return null
+    const out = { ...FADE }
+    for (const k of Object.keys(FADE)) {
+      const v = custom[k]
+      if (typeof v === 'number' && Number.isFinite(v) && v >= SPEED_MIN && v <= SPEED_MAX) out[k] = v
+    }
+    return Object.freeze(out)
+  }
+  const fadeRate = (m, fd) => (fd ? (m.v < 0 ? fd.negative : fd.positive) : 1)
   const transitionKind = (s) => (target(s) >= s.mood ? 'happy' : s.anx >= P.anxiousAt ? 'angry' : 'sad')
   const pullPerHour = (s, sp) => (sp ? Math.min(0.95, P.moodPullPerHour * sp[transitionKind(s)]) : P.moodPullPerHour)
 
@@ -394,8 +411,11 @@
   }
 
   // Passive change over `h` hours. present: you are at Orca. idle: no touch for a long while.
-  // speed: from speed() (null: the one default pace).
-  function decay(s, now, h, { present, idle, speed: sp = null }) {
+  // speed: from speed() (null: the one default pace). fade: from fade() (null: moodlets keep their hours).
+  function decay(s, now, h, { present, idle, speed: sp = null, fade: fd = null }) {
+    // A moodlet on a faster clock uses up (rate − 1) extra hours of its life for every hour that passes (exact
+    // over a long catch-up too: one that ran out partway lands at or before `now` and is dropped below).
+    if (fd) for (const m of s.moodlets) m.until -= h * H * (fadeRate(m, fd) - 1)
     s.moodlets = s.moodlets.filter((m) => m.until > now)
     s.anx *= Math.pow(0.5, (h * 60) / P.anxHalfMin)
     if (s.anx < 0.01) s.anx = 0
@@ -424,20 +444,21 @@
   // Time passed: called every minute while the pet is on screen, and once at start-up to catch up on the
   // time Orca was closed (days are rolled one by one; a long gap counts as time away).
   // ctx.present: you are here now. ctx.sinceTouch: ms since you last touched it. ctx.speed: from speed().
-  function tick(s, now = Date.now(), { present = false, sinceTouch = Infinity, speed: sp = null } = {}) {
+  // ctx.fade: from fade().
+  function tick(s, now = Date.now(), { present = false, sinceTouch = Infinity, speed: sp = null, fade: fd = null } = {}) {
     let cursor = s.lastTick
     const out = { rolled: 0, returned: false }
     if (now <= cursor) return out
     const wasAway = now - cursor > 10 * 60000 // nobody ticks for ten minutes while Orca is open
     const idle = sinceTouch > P.loneIdleMs
     for (let roll = nextRoll(cursor); roll <= now; roll = nextRoll(roll)) {
-      decay(s, roll, (roll - cursor) / H, { present: !wasAway && present, idle, speed: sp })
+      decay(s, roll, (roll - cursor) / H, { present: !wasAway && present, idle, speed: sp, fade: fd })
       dayEnd(s, s.today.present, s.today.interacted)
       s.today = freshDay(dayKey(new Date(roll)))
       out.rolled++
       cursor = roll
     }
-    decay(s, now, (now - cursor) / H, { present: !wasAway && present, idle, speed: sp })
+    decay(s, now, (now - cursor) / H, { present: !wasAway && present, idle, speed: sp, fade: fd })
     s.lastTick = now
     if (present) {
       // The first time today after a day or more away: it stops missing you; after three, a reunion.
@@ -459,14 +480,15 @@
   // ---------- what the engine and the panel read ----------
   // How the feelings lean the idle picks: added to the short-term mood levels.
   const lean = (s) => ({ happy: clamp((s.mood - 50) / 100, -0.5, 0.5), bored: clamp(s.lone / 200, 0, 0.5), worried: clamp(s.anx / 150, 0, 0.67) })
-  function view(s, now = Date.now(), W = WORDS) {
+  // fd: from fade(), so the minutes left are real minutes for a moodlet on a faster or slower clock.
+  function view(s, now = Date.now(), W = WORDS, fd = null) {
     const groups = new Map()
     for (const m of s.moodlets) {
       if (m.until <= now) continue
       const g = groups.get(m.kind) ?? { kind: m.kind, label: W.moodlets[m.kind] ?? m.kind, v: 0, count: 0, until: 0 }
       g.v += m.v
       g.count++
-      g.until = Math.max(g.until, m.until)
+      g.until = Math.max(g.until, now + (m.until - now) / fadeRate(m, fd))
       groups.set(m.kind, g)
     }
     const moodlets = [...groups.values()].sort((a, b) => Math.abs(b.v) - Math.abs(a.v)).map((g) => ({ ...g, leftMin: Math.max(1, Math.round((g.until - now) / 60000)) }))
@@ -496,5 +518,5 @@
     }
   }
 
-  T.companionEmotion = { P, ML, WORDS, TRANSITION, words, speed, transitionKind, create, migrate, normalize, serialize, event, tick, dayEnd, decay, view, lean, target, tierIndex, tierName, tierFloor, stageName, nextStage, moodWord, moodBand, anxWord, loneWord, nextRoll, dayKey, EVENTS: Object.keys(EVENTS) }
+  T.companionEmotion = { P, ML, WORDS, TRANSITION, FADE, words, speed, fade, transitionKind, create, migrate, normalize, serialize, event, tick, dayEnd, decay, view, lean, target, tierIndex, tierName, tierFloor, stageName, nextStage, moodWord, moodBand, anxWord, loneWord, nextRoll, dayKey, EVENTS: Object.keys(EVENTS) }
 })()
