@@ -1,0 +1,201 @@
+// Reload and new windows: every fresh document gets the runtime and the theme again, and a document that
+// receives the runtime twice (Page.addScriptToEvaluateOnNewDocument, then Runtime.evaluate on the new
+// context) still ends up with one runtime and one theme <style>. The page side runs in a tiny fake DOM;
+// the launcher side is checked in its source, since src/themer.mjs starts Orca when imported.
+import { test } from 'node:test'
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import vm from 'node:vm'
+
+const REPO = path.resolve(import.meta.dirname, '..')
+const RUNTIME = fs.readFileSync(path.join(REPO, 'src', 'page-runtime.js'), 'utf8')
+const LAUNCHER = fs.readFileSync(path.join(REPO, 'src', 'themer.mjs'), 'utf8')
+
+// Just enough DOM for page-runtime.js: ids, head/body order, append/prepend/remove, dataset.
+function element(tagName) {
+  const el = {
+    tagName,
+    id: '',
+    textContent: '',
+    parent: null,
+    children: [],
+    dataset: {},
+    attributes: {},
+    get isConnected() {
+      let n = this
+      while (n.parent) n = n.parent
+      return n.tagName === 'html'
+    },
+    get lastElementChild() {
+      return this.children.at(-1) ?? null
+    },
+    appendChild(child) {
+      child.remove()
+      child.parent = this
+      this.children.push(child)
+      return child
+    },
+    prepend(child) {
+      child.remove()
+      child.parent = this
+      this.children.unshift(child)
+    },
+    remove() {
+      if (!this.parent) return
+      this.parent.children.splice(this.parent.children.indexOf(this), 1)
+      this.parent = null
+    },
+    setAttribute(name, value) {
+      this.attributes[name] = String(value)
+    },
+    removeAttribute(name) {
+      delete this.attributes[name]
+    },
+    addEventListener() {},
+    querySelector: () => null
+  }
+  return el
+}
+
+function all(node, out = []) {
+  for (const c of node.children) out.push(c), all(c, out)
+  return out
+}
+
+/** A fresh document, as after a reload or in a newly opened window. */
+function freshWindow() {
+  const html = element('html')
+  const head = html.appendChild(element('head'))
+  const body = html.appendChild(element('body'))
+  const sent = []
+  const listeners = []
+  const document = {
+    documentElement: html,
+    head,
+    body,
+    createElement: element,
+    getElementById: (id) => all(html).find((n) => n.id === id) ?? null,
+    addEventListener(type, fn) {
+      if (type === 'DOMContentLoaded') fn()
+    }
+  }
+  const win = {
+    document,
+    location: { href: 'file:///orca/out/renderer/index.html' },
+    navigator: { platform: 'Win32' },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    MutationObserver: class {
+      observe() {}
+      disconnect() {}
+    },
+    CustomEvent: class {
+      constructor(type) {
+        this.type = type
+      }
+    },
+    dispatchEvent() {},
+    addEventListener: (type) => listeners.push(type),
+    removeEventListener() {},
+    setTimeout: () => 0,
+    clearTimeout() {},
+    setInterval: () => 0,
+    clearInterval() {},
+    console: { warn() {}, log() {} },
+    orcaThemerSend: (json) => sent.push(JSON.parse(json))
+  }
+  win.window = win
+  const context = vm.createContext(win)
+  return {
+    win,
+    sent,
+    listeners,
+    inject: () => vm.runInContext(RUNTIME, context, { filename: 'page-runtime.js' }),
+    themeStyles: () => all(html).filter((n) => n.id === 'orca-themer-style')
+  }
+}
+
+const payload = (css) => ({ state: { themes: [{ id: 'night', touches: [] }], themeId: 'night', enabledTouches: [] }, css })
+
+test('reinject: a second copy in the same document is ignored (one runtime, one hello, one picker shortcut)', () => {
+  const w = freshWindow()
+  w.inject() // Page.addScriptToEvaluateOnNewDocument
+  const runtime = w.win.__orcaThemer
+  const listenersAfterFirst = w.listeners.length
+  w.inject() // Runtime.evaluate on Runtime.executionContextCreated
+  w.inject() // a touch save re-evaluates it once more
+  assert.equal(w.win.__orcaThemer, runtime, 'the first runtime stays')
+  assert.equal(w.listeners.length, listenersAfterFirst, 'no second set of keydown listeners')
+  assert.deepEqual(w.sent.map((m) => m.type), ['hello'])
+})
+
+test('reinject: applying again reuses the theme <style>, never adds a second one', () => {
+  const w = freshWindow()
+  w.inject()
+  w.win.__orcaThemer.apply(payload(':root{--background:#000}'))
+  w.inject()
+  w.win.__orcaThemer.apply(payload(':root{--background:#111}'))
+  const styles = w.themeStyles()
+  assert.equal(styles.length, 1)
+  assert.equal(styles[0].textContent, ':root{--background:#111}')
+  assert.equal(w.win.document.head.lastElementChild, styles[0], 'kept last in <head> so it wins ties')
+  assert.equal(w.win.document.documentElement.dataset.orcaTheme, 'night')
+})
+
+test('reinject: a theme <style> already in the page is taken over, not duplicated', () => {
+  const w = freshWindow()
+  const old = element('style')
+  old.id = 'orca-themer-style'
+  w.win.document.head.appendChild(old)
+  w.win.document.head.appendChild(element('link')) // a lazy chunk stylesheet added after it
+  w.inject()
+  w.win.__orcaThemer.apply(payload('a{}'))
+  assert.deepEqual(w.themeStyles(), [old])
+  assert.equal(old.textContent, 'a{}')
+  assert.equal(w.win.document.head.lastElementChild, old)
+})
+
+test('reinject: a reload or a new window starts clean and gets the runtime and the theme again', () => {
+  const before = freshWindow()
+  before.inject()
+  before.win.__orcaThemer.apply(payload('a{}'))
+  for (const next of [freshWindow(), freshWindow()]) {
+    assert.equal(next.win.__orcaThemer, undefined)
+    next.inject()
+    next.inject()
+    assert.ok(next.win.__orcaThemer, 'runtime installed in the new document')
+    assert.notEqual(next.win.__orcaThemer, before.win.__orcaThemer)
+    next.win.__orcaThemer.apply(payload('a{}'))
+    assert.equal(next.themeStyles().length, 1)
+    assert.deepEqual(next.sent.map((m) => m.type), ['hello'])
+  }
+})
+
+// The launcher half: what makes the page side above happen on every reload and every window.
+const handler = (event) => {
+  const start = LAUNCHER.indexOf(`cdp.on('${event}'`)
+  assert.ok(start >= 0, `launcher listens to ${event}`)
+  const end = LAUNCHER.indexOf('\ncdp.on(', start + 1)
+  return LAUNCHER.slice(start, end < 0 ? undefined : end)
+}
+
+test('reinject: every page target registers the runtime for each new document before it resumes', () => {
+  const attach = handler('Target.attachedToTarget')
+  assert.match(attach, /Page\.addScriptToEvaluateOnNewDocument', \{ source: pageScript\(\) \}/)
+  assert.match(attach, /Runtime\.enable/)
+  const resumed = attach.indexOf('const resumed')
+  assert.ok(resumed > 0 && attach.indexOf('addScriptToEvaluateOnNewDocument') < resumed, 'registered before the paused page resumes')
+  // A theme change swaps the registered script instead of stacking a second one per document.
+  assert.match(LAUNCHER, /removeScriptToEvaluateOnNewDocument', \{ identifier: entry\.scriptId \}/)
+})
+
+test('reinject: each new main-world context is evaluated once, and a throw is logged from exceptionDetails', () => {
+  const created = handler('Runtime.executionContextCreated')
+  assert.match(created, /context\.auxData\?\.isDefault/, 'only the main world, not the preload world')
+  assert.match(created, /Runtime\.evaluate', \{ expression: pageScript\(\), contextId: context\.id \}/)
+  assert.match(created, /r\.exceptionDetails/)
+  assert.match(created, /runtimeError \?\?=/, 'the first error reaches the update checkup')
+  assert.match(created, /log\('runtime evaluated'/)
+  // The runtime itself is what makes the second copy harmless.
+  assert.match(RUNTIME, /^\s*if \(window\.__orcaThemer\) return$/m)
+})
